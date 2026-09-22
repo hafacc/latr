@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   serverTimestamp,
@@ -17,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { auth, db, firebaseConfigured } from "./firebase";
 import { planMerge } from "./merge";
+import { SnoozeStatsStore } from "./snooze-stats-store";
 import { fromFirestore, type Todo, toFirestoreFields } from "./todo";
 import {
   FirestoreTodoStore,
@@ -29,6 +31,7 @@ export class TodoStoreHolder {
   private localStore = new LocalTodoStore();
   private firestoreStore: FirestoreTodoStore | null = null;
   private currentStore: TodoStore = this.localStore;
+  readonly snoozeStats = new SnoozeStatsStore();
   private listeners = new Set<() => void>();
   private storeUnsub: (() => void) | null = null;
   private unsubAuth: (() => void) | null = null;
@@ -69,6 +72,7 @@ export class TodoStoreHolder {
 
   hydrate(): void {
     this.localStore.hydrate();
+    this.snoozeStats.hydrate();
   }
 
   /** Sign in via Google, then push offline local edits into Firestore. */
@@ -91,7 +95,16 @@ export class TodoStoreHolder {
       }
       throw e;
     }
-    await this.mergeLocalIntoFirestore(uid);
+    try {
+      await this.mergeLocalIntoFirestore(uid);
+    } finally {
+      // Runs even if the todo merge failed: the user is still signed in.
+      try {
+        await this.snoozeStats.pushToRemote(uid);
+      } catch (e) {
+        console.error("snooze-stats sign-in push failed", e);
+      }
+    }
   }
 
   /** Sign out; copies todos into the local store first to preserve them. */
@@ -108,12 +121,14 @@ export class TodoStoreHolder {
     await reauthenticateWithPopup(user, new GoogleAuthProvider());
     await this.snapshotFirestoreIntoLocal();
     if (this.firestoreStore) await this.firestoreStore.deleteAll();
+    await deleteDoc(doc(db(), "users", user.uid));
     await user.delete();
   }
 
   /** Reattach the Firestore snapshot listener (after tab wake / online). */
   reattach(): void {
     this.firestoreStore?.reattach();
+    this.snoozeStats.reattach();
   }
 
   dispose(): void {
@@ -128,6 +143,7 @@ export class TodoStoreHolder {
     this.localStore.dispose();
     this.firestoreStore?.dispose();
     this.firestoreStore = null;
+    this.snoozeStats.dispose();
     // Reset so a re-setup with the same uid re-swaps instead of reusing the disposed store.
     this.user = null;
     this.currentStore = this.localStore;
@@ -152,12 +168,14 @@ export class TodoStoreHolder {
   private swapToFirestore(uid: string): void {
     this.firestoreStore?.dispose();
     this.firestoreStore = new FirestoreTodoStore(uid);
+    this.snoozeStats.attachRemote(uid);
     this.setStore(this.firestoreStore);
   }
 
   private swapToLocal(): void {
     this.firestoreStore?.dispose();
     this.firestoreStore = null;
+    this.snoozeStats.detachRemote();
     this.setStore(this.localStore);
   }
 
