@@ -1,20 +1,37 @@
 "use client";
 
-import { type ReactElement, useEffect, useState } from "react";
-import ClearAllDoneBar from "../components/clear-all-done-bar";
+import {
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { LuPlus } from "react-icons/lu";
+import { AuthProvider } from "../components/auth-menu";
 import ComposeRow from "../components/compose-row";
+import { DOCK_ORDER, FILTER_META } from "../components/filters";
+import { ListHeader, MobileAppBar } from "../components/list-header";
 import Sidebar from "../components/sidebar";
-import TodoList from "../components/todo-list";
-import TopBar from "../components/top-bar";
+import TodoList, { ListSkeleton } from "../components/todo-list";
+import UndoSnackbar from "../components/undo-snackbar";
 import { isEditableTarget } from "../utils/keyboard";
 import { useTodos } from "../utils/store";
-import { FILTERS, type Filter } from "../utils/todo";
+import {
+  FILTERS,
+  type Filter,
+  matchesFilter,
+  rankBySearch,
+} from "../utils/todo";
 
 const SIDEBAR_COLLAPSED_KEY = "latr:sidebar:v1";
 
 export default function Page(): ReactElement {
   const {
     hydrated,
+    todos,
+    now,
     filter,
     search,
     focusId,
@@ -23,8 +40,40 @@ export default function Page(): ReactElement {
     setSearch,
     setFocus,
     undo,
+    clearAllDone,
   } = useTodos();
   const [collapsed, setCollapsed] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const composeRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const counts = useMemo(
+    () => ({
+      ACTIVE: todos.filter((t) => matchesFilter(t, "ACTIVE", now)).length,
+      SNOOZED: todos.filter((t) => matchesFilter(t, "SNOOZED", now)).length,
+    }),
+    [todos, now],
+  );
+  const visibleCount = useMemo(() => {
+    const filtered = todos.filter((t) => matchesFilter(t, filter, now));
+    return search.trim().length > 0
+      ? rankBySearch(filtered, search).length
+      : filtered.length;
+  }, [todos, filter, search, now]);
+  const hasDone = todos.some((t) => t.state === "DONE");
+  const clearAllCb = useCallback(() => clearAllDone(), [clearAllDone]);
+  const clearAll = filter === "DONE" && hasDone ? clearAllCb : null;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "/") return;
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") setCollapsed(true);
@@ -148,67 +197,112 @@ export default function Page(): ReactElement {
   }, [setFocus]);
 
   return (
-    <div className="min-h-dvh">
-      <Sidebar
-        filter={filter}
-        onFilter={setFilter}
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((v) => !v)}
-      />
-      <main
-        style={
-          {
-            "--sidebar-reserved": collapsed ? "3.5rem" : "14rem",
-          } as React.CSSProperties
-        }
-        className="flex flex-col min-h-dvh min-w-0"
-      >
-        <TopBar search={search} onSearch={setSearch} />
-        <MobileFilterBar filter={filter} onFilter={setFilter} />
-        <div
-          className="
-            flex-1 w-full max-w-2xl mx-auto px-4 sm:px-6 pt-8 pb-96 space-y-6
-            md:ml-[max(var(--sidebar-reserved),calc((100vw-42rem)/2))]
-            transition-[margin-left] duration-200 ease-out
-          "
+    <AuthProvider>
+      <div className="min-h-dvh">
+        <Sidebar
+          filter={filter}
+          onFilter={setFilter}
+          counts={counts}
+          collapsed={collapsed}
+          onToggleCollapsed={() => setCollapsed((v) => !v)}
+        />
+        <main
+          style={
+            {
+              "--sidebar-reserved": collapsed ? "3.5rem" : "15rem",
+            } as React.CSSProperties
+          }
+          className="flex flex-col min-h-dvh min-w-0 md:pl-[var(--sidebar-reserved)] transition-[padding-left] duration-200 ease-out"
         >
-          <ComposeRow />
-          {hydrated ? (
-            <TodoList />
-          ) : (
-            <div className="text-center text-muted py-20 text-sm">Loading…</div>
-          )}
-        </div>
-        <ClearAllDoneBar />
-      </main>
-    </div>
+          <MobileAppBar
+            title={FILTER_META[filter].label}
+            count={visibleCount}
+            search={search}
+            onSearch={setSearch}
+            searching={searching}
+            onSearching={setSearching}
+            onClearAll={clearAll}
+          />
+          <div className="flex-1 w-full max-w-[680px] mx-auto max-md:pl-[max(0.5rem,env(safe-area-inset-left))] max-md:pr-[max(0.5rem,env(safe-area-inset-right))] md:box-content md:px-12 pb-40 md:pb-32">
+            <ListHeader
+              title={FILTER_META[filter].label}
+              count={visibleCount}
+              search={search}
+              onSearch={setSearch}
+              searchRef={searchRef}
+              onClearAll={clearAll}
+            />
+            <div className="space-y-5 pt-1 md:pt-2">
+              <ComposeRow
+                inputRef={composeRef}
+                onCreated={() => setSearching(false)}
+              />
+              {hydrated ? <TodoList /> : <ListSkeleton />}
+            </div>
+          </div>
+          <UndoSnackbar />
+          <BottomDock
+            filter={filter}
+            onFilter={setFilter}
+            onCompose={() => {
+              setFilter("ACTIVE");
+              setSearch("");
+              setSearching(false);
+              window.scrollTo({ top: 0 });
+              composeRef.current?.focus();
+            }}
+          />
+        </main>
+      </div>
+    </AuthProvider>
   );
 }
 
-function MobileFilterBar({
+function BottomDock({
   filter,
   onFilter,
+  onCompose,
 }: {
   filter: Filter;
   onFilter: (f: Filter) => void;
+  onCompose: () => void;
 }): ReactElement {
   return (
-    <div className="md:hidden sticky top-14 z-10 bg-bg/90 backdrop-blur border-b border-border/50">
-      <div className="flex max-w-2xl mx-auto px-2">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => onFilter(f)}
-            className={`
-              flex-1 py-2.5 text-sm capitalize transition-colors
-              ${f === filter ? "text-accent border-b-2 border-accent font-medium" : "text-muted hover:text-text"}
-            `}
-          >
-            {f.toLowerCase()}
-          </button>
-        ))}
+    <nav
+      aria-label="Filters"
+      className="md:hidden fixed inset-x-0 bottom-0 z-20 flex items-center justify-center gap-3 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-2 pb-[max(env(safe-area-inset-bottom),16px)] pointer-events-none"
+    >
+      <div className="pointer-events-auto flex items-center gap-1 p-1.5 rounded-full bg-surface-raised shadow-dock">
+        {DOCK_ORDER.map((f) => {
+          const { label, icon: Icon } = FILTER_META[f];
+          const active = f === filter;
+          return (
+            <button
+              key={f}
+              type="button"
+              onClick={() => onFilter(f)}
+              aria-pressed={active}
+              aria-label={label}
+              className={`h-11 flex items-center justify-center gap-2 rounded-full transition-all ${
+                active
+                  ? "px-4 bg-accent-soft text-accent-strong font-medium text-sm"
+                  : "w-11 text-text-secondary"
+              }`}
+            >
+              <Icon className="w-5 h-5 shrink-0" />
+              {active && <span>{label}</span>}
+            </button>
+          );
+        })}
       </div>
-    </div>
+      <button
+        type="button"
+        onClick={onCompose}
+        aria-label="Add a todo"
+        className="pointer-events-auto w-14 h-14 flex items-center justify-center rounded-2xl bg-accent text-on-accent shadow-dock active:scale-95 transition-transform"
+      >
+        <LuPlus className="w-6 h-6" />
+      </button>
+    </nav>
   );
 }

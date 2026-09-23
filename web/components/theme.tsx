@@ -11,14 +11,16 @@ import {
   useState,
 } from "react";
 
+export type ThemeMode = "system" | "light" | "dark";
+
 type ThemeContextValue = {
-  theme: boolean | undefined;
-  toggleTheme: () => void;
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: undefined,
-  toggleTheme: () => {},
+  mode: "system",
+  setMode: () => {},
 });
 
 export function useTheme(): ThemeContextValue {
@@ -79,21 +81,18 @@ export default function ThemeProvider({
   useEffect(() => {
     if (dark) document.documentElement.classList.add("dark");
     else document.documentElement.classList.remove("dark");
+    for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+      meta.setAttribute("content", dark ? "#171615" : "#fbfaf8");
+    }
   }, [dark]);
 
-  const [toggled, setToggled] = useState(false);
-  const toggleTheme = useCallback(() => {
-    if (theme === undefined) setTheme(!matcher.matches);
-    else if (toggled) {
-      setTheme(undefined);
-      setToggled(false);
-    } else {
-      setTheme(!theme);
-      setToggled(true);
-    }
-  }, [theme, matcher.matches, toggled]);
+  const setMode = useCallback((mode: ThemeMode) => {
+    setTheme(mode === "system" ? undefined : mode === "dark");
+  }, []);
+  const mode: ThemeMode =
+    theme === undefined ? "system" : theme ? "dark" : "light";
 
-  const value = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme]);
+  const value = useMemo(() => ({ mode, setMode }), [mode, setMode]);
 
   return (
     <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
