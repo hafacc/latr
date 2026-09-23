@@ -3,12 +3,13 @@
 import { type ReactElement, type RefObject, useEffect, useState } from "react";
 import { isEditableTarget } from "../utils/keyboard";
 import { useTodos } from "../utils/store";
+import TextEditor, { type TextEditorHandle } from "./text-editor";
 
 export default function ComposeRow({
   inputRef,
   onCreated,
 }: {
-  inputRef: RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<TextEditorHandle | null>;
   onCreated: () => void;
 }): ReactElement {
   const { create, setFocus, setFilter, setSearch } = useTodos();
@@ -65,24 +66,17 @@ export default function ComposeRow({
       >
         <circle cx="12" cy="12" r="8.5" />
       </svg>
-      <input
-        ref={inputRef}
-        type="text"
+      <TextEditor
+        handleRef={inputRef}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={setDraft}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            submit();
-          } else if (e.key === "Escape") {
-            (e.currentTarget as HTMLInputElement).blur();
-          }
-        }}
+        onEnter={submit}
         enterKeyHint={draft.trim().length === 0 ? "done" : "next"}
         placeholder="Add a todo…"
-        className="flex-1 min-w-0 bg-transparent outline-none text-text placeholder:text-text-secondary py-1 max-md:text-base"
+        ariaLabel="Add a todo"
+        className="flex-1 min-w-0 py-1 text-[15px] leading-[22px] max-md:text-[16px] max-md:leading-6 text-text"
       />
       <kbd className="hidden md:inline text-[11.5px] font-medium px-1.5 rounded-md bg-surface border border-border text-text-secondary font-sans group-focus-within/compose:hidden">
         n

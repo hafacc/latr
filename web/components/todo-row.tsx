@@ -34,6 +34,8 @@ import type { Todo } from "../utils/todo";
 import { isoToEpoch, isSnoozed } from "../utils/todo";
 import { DESKTOP_QUERY, useMediaQuery } from "../utils/use-media";
 import { SnoozePopover, SnoozeSheet } from "./snooze-menu";
+import StyledText from "./styled-text";
+import TextEditor, { type TextEditorHandle } from "./text-editor";
 
 function Hint({
   children,
@@ -176,7 +178,8 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
   const showHints =
     modifierHeld && (focused || (focusId === null && isHovered));
   const rowRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<TextEditorHandle>(null);
+  const pendingCaretRef = useRef<{ x: number; y: number } | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const suppressClickRef = useRef(false);
 
@@ -204,9 +207,12 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
   useLayoutEffect(() => {
     if (!focused) return;
     rowRef.current?.scrollIntoView({ block: "nearest" });
-    inputRef.current?.focus();
-    const len = inputRef.current?.value.length ?? 0;
-    inputRef.current?.setSelectionRange(len, len);
+    const pending = pendingCaretRef.current;
+    pendingCaretRef.current = null;
+    const editor = editorRef.current;
+    editor?.focus(
+      (pending && editor.posAtCoords(pending.x, pending.y)) ?? "end",
+    );
     // The on-screen keyboard shrinks the viewport after focus; keep the row clear of the dock.
     const onResize = () => rowRef.current?.scrollIntoView({ block: "nearest" });
     window.addEventListener("resize", onResize);
@@ -254,7 +260,7 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
 
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     if (e.pointerType !== "touch") return;
-    if (document.activeElement === inputRef.current) return;
+    if (isFocused) return;
     if (startsAtEdge(e.clientX, window.innerWidth)) return;
     dragRef.current = {
       pointerId: e.pointerId,
@@ -279,7 +285,7 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
       if (drag.lock === "horizontal") {
         e.currentTarget.setPointerCapture(e.pointerId);
         suppressClickRef.current = true;
-        inputRef.current?.blur();
+        editorRef.current?.blur();
       }
     }
     if (drag.lock === "horizontal") setDx(moveX);
@@ -308,6 +314,7 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
     Math.abs(dx) >= commitThreshold(rowRef.current?.offsetWidth ?? 0);
 
   const primaryLabel = isDone ? "Reactivate" : "Mark done";
+  const textTone = isDone ? "line-through text-text-secondary" : "text-text";
 
   // Desktop action buttons hide at rest and fade in on hover/focus (or while the snooze popover is open).
   const hoverAction =
@@ -400,39 +407,66 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
         </button>
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <label className="flex min-w-0 cursor-text">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                edit(todo.id, e.target.value);
-              }}
-              onFocus={() => {
-                setIsFocused(true);
-                setFocus(todo.id);
-              }}
-              onBlur={() => {
-                setIsFocused(false);
-                setFocus(null);
-                if (text.trim().length === 0) remove(todo.id);
-                else dropEmpty();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+          <div className="flex min-w-0 cursor-text">
+            {focused || isFocused ? (
+              <TextEditor
+                handleRef={editorRef}
+                value={text}
+                onChange={(value) => {
+                  setText(value);
+                  edit(todo.id, value);
+                }}
+                onFocus={() => {
+                  setIsFocused(true);
+                  setFocus(todo.id);
+                }}
+                onBlur={() => {
+                  setIsFocused(false);
+                  setFocus(null);
+                  if (text.trim().length === 0) remove(todo.id);
+                  else dropEmpty();
+                }}
+                onEnter={(view) => view.contentDOM.blur()}
+                multiline
+                ariaLabel="Todo"
+                className={`flex-1 min-w-0 text-[15px] leading-[22px] max-md:text-[16px] max-md:leading-6 ${textTone}`}
+              />
+            ) : (
+              // biome-ignore lint/a11y/useSemanticElements: static styled text that swaps to the editor on focus
+              <div
+                role="textbox"
+                aria-multiline="true"
+                tabIndex={0}
+                // The native mousedown focus would land on this node, which the editor replaces mid-event.
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
                   e.preventDefault();
-                  (e.currentTarget as HTMLTextAreaElement).blur();
-                }
-              }}
-              className={`
-                flex-1 min-w-0 bg-transparent outline-none text-text resize-none
-                field-sizing-content overflow-hidden text-[15px] leading-[22px] max-md:text-base max-md:leading-6
-                placeholder:text-muted
-                ${isDone ? "line-through text-text-secondary" : ""}
-              `}
-            />
-          </label>
+                  const start = { x: e.clientX, y: e.clientY };
+                  pendingCaretRef.current = start;
+                  setFocus(todo.id);
+                  // The editor mounts under the pointer mid-drag, so extend its selection by hand.
+                  const onMove = (m: MouseEvent) => {
+                    const editor = editorRef.current;
+                    const anchor = editor?.posAtCoords(start.x, start.y);
+                    const head = editor?.posAtCoords(m.clientX, m.clientY);
+                    if (editor && anchor != null && head != null) {
+                      editor.select(anchor, head);
+                    }
+                  };
+                  const onUp = () => {
+                    window.removeEventListener("mousemove", onMove);
+                    window.removeEventListener("mouseup", onUp);
+                  };
+                  window.addEventListener("mousemove", onMove);
+                  window.addEventListener("mouseup", onUp);
+                }}
+                onFocus={() => setFocus(todo.id)}
+                className={`flex-1 min-w-0 whitespace-pre-wrap break-words outline-none text-[15px] leading-[22px] max-md:text-[16px] max-md:leading-6 ${textTone}`}
+              >
+                {text === "" ? "\u200b" : <StyledText text={text} />}
+              </div>
+            )}
+          </div>
           {!desktop && isFocused && (
             <div className="flex gap-1 pt-2 -ml-2">
               {isActivelySnoozed && (
@@ -584,7 +618,7 @@ function StripButton({
   return (
     <button
       type="button"
-      // Keep the textarea focused through the tap, or the strip unmounts before the click lands.
+      // Keep the editor focused through the tap, or the strip unmounts before the click lands.
       onPointerDown={(e) => e.preventDefault()}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}

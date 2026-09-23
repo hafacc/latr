@@ -124,6 +124,18 @@ body {
   box-sizing: border-box;
 }
 
+.md-bold {
+  font-weight: 600;
+}
+
+.md-italic {
+  font-style: italic;
+}
+
+.md-marker {
+  color: var(--color-muted);
+}
+
 @keyframes undo-drain {
   from {
     transform: scaleX(1);
