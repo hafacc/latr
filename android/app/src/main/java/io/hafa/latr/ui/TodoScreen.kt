@@ -134,6 +134,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -1241,6 +1242,7 @@ fun TodoItem(
             val placeholderTextStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = colorScheme.onSurfaceVariant,
             )
+            val inlineStyle = remember(editorTextStyle.color) { InlineStyleTransformation(editorTextStyle.color) }
             Icon(
                 imageVector = stateIcon,
                 contentDescription = if (todo.pinned) "Pinned" else null,
@@ -1292,6 +1294,7 @@ fun TodoItem(
                                 }
                             },
                         textStyle = editorTextStyle,
+                        visualTransformation = inlineStyle,
                         cursorBrush = SolidColor(colorScheme.primary),
                         keyboardOptions = KeyboardOptions(
                             imeAction = if (isInFastComposeMode && fieldValue.text.isNotEmpty())
@@ -1317,7 +1320,10 @@ fun TodoItem(
                 } else {
                     // Passively record the tap's caret offset (Initial pass, no consume) so onClick opens there.
                     Text(
-                        text = todo.text.ifEmpty { "Enter todo..." },
+                        text = if (todo.text.isEmpty()) AnnotatedString("Enter todo...")
+                        else remember(todo.text, editorTextStyle.color) {
+                            styledTodoText(todo.text, editorTextStyle.color)
+                        },
                         style = if (todo.text.isEmpty()) placeholderTextStyle else editorTextStyle,
                         onTextLayout = { textLayoutResult = it },
                         modifier = Modifier

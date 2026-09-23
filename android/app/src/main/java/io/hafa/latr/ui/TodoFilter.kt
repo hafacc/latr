@@ -2,6 +2,7 @@ package io.hafa.latr.ui
 
 import io.hafa.latr.data.Todo
 import io.hafa.latr.data.TodoState
+import io.hafa.latr.util.InlineStyle
 import io.hafa.latr.util.LocalDateTimeUtil
 
 enum class StatusFilter { ACTIVE, SNOOZED, DONE, ALL }
@@ -67,7 +68,7 @@ fun List<Todo>.filterAndSort(
                     .map { "\\b${Regex.escape(it.lowercase())}".toRegex() }
             sorted
                 .map { todo ->
-                    val todoTextLower = todo.text.lowercase()
+                    val todoTextLower = InlineStyle.plain(todo.text).lowercase()
                     val matchCount = searchPatterns.count { pattern ->
                         pattern.containsMatchIn(todoTextLower)
                     }
