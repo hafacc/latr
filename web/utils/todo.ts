@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase/firestore";
+import { plainText } from "./inline-style";
 
 export type TodoState = "ACTIVE" | "DONE";
 
@@ -161,7 +162,7 @@ export function rankBySearch(todos: readonly Todo[], query: string): Todo[] {
   const patterns = words.map((w) => new RegExp(`\\b${escapeRegex(w)}`));
   const scored: { t: Todo; score: number }[] = [];
   for (const t of todos) {
-    const hay = t.text.toLowerCase();
+    const hay = plainText(t.text).toLowerCase();
     let score = 0;
     for (const p of patterns) {
       if (p.test(hay)) score++;

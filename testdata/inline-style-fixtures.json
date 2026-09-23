@@ -1,0 +1,50 @@
+{
+  "_doc": {
+    "spans": "[style, start, end] in UTF-16 code units, end exclusive; a span includes its two markers (text[start] and text[end-1]). Sorted by start ascending, then end descending.",
+    "plain": "the text with every span's two marker characters removed",
+    "whitespace": "exactly U+0009-U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000, U+FEFF",
+    "letterOrDigit": "Unicode categories L*, Nd, and M* (combining marks)"
+  },
+  "cases": [
+    { "name": "bold", "in": "*bold*", "spans": [["bold", 0, 6]], "plain": "bold" },
+    { "name": "italic", "in": "_it_", "spans": [["italic", 0, 4]], "plain": "it" },
+    { "name": "empty string", "in": "", "spans": [], "plain": "" },
+    { "name": "lone asterisk", "in": "*", "spans": [], "plain": "*" },
+    { "name": "lone underscore", "in": "_", "spans": [], "plain": "_" },
+    { "name": "snake_case stays literal", "in": "snake_case_names", "spans": [], "plain": "snake_case_names" },
+    { "name": "arithmetic stays literal", "in": "2*3*4", "spans": [], "plain": "2*3*4" },
+    { "name": "mid-word asterisk stays literal", "in": "f*ck", "spans": [], "plain": "f*ck" },
+    { "name": "letter before opener stays literal", "in": "x*y*", "spans": [], "plain": "x*y*" },
+    { "name": "url-ish underscores stay literal", "in": "a_b_c", "spans": [], "plain": "a_b_c" },
+    { "name": "spaced markers stay literal", "in": "a * b * c", "spans": [], "plain": "a * b * c" },
+    { "name": "double asterisk run stays literal", "in": "**x**", "spans": [], "plain": "**x**" },
+    { "name": "dunder stays literal", "in": "__init__", "spans": [], "plain": "__init__" },
+    { "name": "unclosed opener stays literal", "in": "*unclosed", "spans": [], "plain": "*unclosed" },
+    { "name": "bold around italic", "in": "*_x_*", "spans": [["bold", 0, 5], ["italic", 1, 4]], "plain": "x" },
+    { "name": "italic around bold", "in": "_*x*_", "spans": [["italic", 0, 5], ["bold", 1, 4]], "plain": "x" },
+    { "name": "crossed opener is dropped", "in": "*a _b* c_", "spans": [["bold", 0, 6]], "plain": "a _b c_" },
+    { "name": "punctuation around a span", "in": "(*x*),", "spans": [["bold", 1, 4]], "plain": "(x)," },
+    { "name": "apostrophe earlier on the line", "in": "don't *do* it", "spans": [["bold", 6, 10]], "plain": "don't do it" },
+    { "name": "emoji inside markers", "in": "*🎉*", "spans": [["bold", 0, 4]], "plain": "🎉" },
+    { "name": "spans never cross a newline", "in": "*a\nb*", "spans": [], "plain": "*a\nb*" },
+    { "name": "one span per line", "in": "*a*\n_b_", "spans": [["bold", 0, 3], ["italic", 4, 7]], "plain": "a\nb" },
+    { "name": "inner asterisk between letters stays literal", "in": "*a*b*", "spans": [["bold", 0, 5]], "plain": "a*b" },
+    { "name": "underscore opener inside bold is dropped", "in": "*_*", "spans": [["bold", 0, 3]], "plain": "_" },
+    { "name": "snake_case inside italic", "in": "_snake_case_", "spans": [["italic", 0, 12]], "plain": "snake_case" },
+    { "name": "tab just inside the opener", "in": "*\tx*", "spans": [], "plain": "*\tx*" },
+    { "name": "tab just inside the closer", "in": "*x\t*", "spans": [], "plain": "*x\t*" },
+    { "name": "no-break space just inside the opener", "in": "* x*", "spans": [], "plain": "* x*" },
+    { "name": "adjacent bold then italic, not nested", "in": "*a*_b_", "spans": [["bold", 0, 3], ["italic", 3, 6]], "plain": "ab" },
+    { "name": "marker at the very end", "in": "done *", "spans": [], "plain": "done *" },
+    { "name": "combining mark before a marker counts as a letter", "in": "cafe\u0301_x_", "spans": [], "plain": "cafe\u0301_x_" },
+    { "name": "combining mark before a closer", "in": "_e\u0301_", "spans": [["italic", 0, 4]], "plain": "e\u0301" },
+    { "name": "zero-width no-break space is whitespace", "in": "*\ufeffx*", "spans": [], "plain": "*\ufeffx*" },
+    { "name": "unit separator control is not whitespace", "in": "*\u001fx*", "spans": [["bold", 0, 4]], "plain": "\u001fx" },
+    {
+      "name": "several spans on one line",
+      "in": "*a* and _b_ and *c*",
+      "spans": [["bold", 0, 3], ["italic", 8, 11], ["bold", 16, 19]],
+      "plain": "a and b and c"
+    }
+  ]
+}

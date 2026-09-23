@@ -396,4 +396,13 @@ describe("rankBySearch", () => {
     const miss = todo({ id: "miss", text: "code 5x99" });
     expect(rankBySearch([hit, miss], "5.99").map((x) => x.id)).toEqual(["hit"]);
   });
+
+  test("matches words inside inline-style markers", () => {
+    const italic = todo({ id: "italic", text: "buy _milk_" });
+    const bold = todo({ id: "bold", text: "buy *milk*" });
+    expect(rankBySearch([italic, bold], "milk").map((x) => x.id)).toEqual([
+      "italic",
+      "bold",
+    ]);
+  });
 });

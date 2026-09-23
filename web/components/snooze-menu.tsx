@@ -43,6 +43,7 @@ import {
   type SnoozeSource,
 } from "../utils/snooze-suggest";
 import Sheet from "./sheet";
+import StyledText from "./styled-text";
 
 const MENU_CLOCK_TICK_MS = 30_000;
 
@@ -439,7 +440,7 @@ export function SnoozeSheet({
       <div className="px-5 pt-1 pb-1">
         <h2 className="m-0 text-lg font-semibold">Snooze</h2>
         <p className="m-0 mt-0.5 text-sm text-text-secondary truncate">
-          {todoText}
+          <StyledText text={todoText} />
         </p>
       </div>
       <div className="px-1.5" role="menu" aria-label="Snooze until">

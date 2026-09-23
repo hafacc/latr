@@ -1,5 +1,6 @@
 "use client";
 
+import { EditorView } from "@codemirror/view";
 import {
   type ReactElement,
   useCallback,
@@ -14,6 +15,7 @@ import ComposeRow from "../components/compose-row";
 import { DOCK_ORDER, FILTER_META } from "../components/filters";
 import { ListHeader, MobileAppBar } from "../components/list-header";
 import Sidebar from "../components/sidebar";
+import type { TextEditorHandle } from "../components/text-editor";
 import TodoList, { ListSkeleton } from "../components/todo-list";
 import UndoSnackbar from "../components/undo-snackbar";
 import { isEditableTarget } from "../utils/keyboard";
@@ -44,7 +46,7 @@ export default function Page(): ReactElement {
   } = useTodos();
   const [collapsed, setCollapsed] = useState(false);
   const [searching, setSearching] = useState(false);
-  const composeRef = useRef<HTMLInputElement>(null);
+  const composeRef = useRef<TextEditorHandle>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const counts = useMemo(
@@ -170,18 +172,16 @@ export default function Page(): ReactElement {
         return;
       }
 
-      // Inside a todo row's textarea: only hand off to row-nav when the
-      // caret has no logical newline in the direction of travel; otherwise
-      // let the browser move the caret within the multi-line textarea.
-      const ta = target as HTMLTextAreaElement;
-      if (ta.tagName !== "TEXTAREA") return;
-      const value = ta.value;
+      // Inside a todo row's editor: only hand off to row-nav when the caret
+      // has no logical newline in the direction of travel.
+      if (!target) return;
+      const view = EditorView.findFromDOM(target);
+      if (!view) return;
+      const { from, to } = view.state.selection.main;
       if (e.key === "ArrowUp") {
-        const before = value.slice(0, ta.selectionStart ?? 0);
-        if (before.includes("\n")) return;
-      } else {
-        const after = value.slice(ta.selectionEnd ?? value.length);
-        if (after.includes("\n")) return;
+        if (view.state.doc.sliceString(0, from).includes("\n")) return;
+      } else if (view.state.doc.sliceString(to).includes("\n")) {
+        return;
       }
       const idx = rows.indexOf(row);
       const nextIdx = e.key === "ArrowUp" ? idx - 1 : idx + 1;
