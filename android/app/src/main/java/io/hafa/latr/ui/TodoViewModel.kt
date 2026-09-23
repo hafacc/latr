@@ -50,9 +50,18 @@ class TodoViewModel(
     private val _undoVisible = MutableStateFlow(false)
     val undoVisible: StateFlow<Boolean> = _undoVisible
 
+    private val _undoLabel = MutableStateFlow("")
+    val undoLabel: StateFlow<String> = _undoLabel
+
     private var undoExpiryJob: Job? = null
 
     private fun armUndo() {
+        _undoLabel.value = when (val action = _lastAction) {
+            is UndoableAction.Delete -> if (action.todos.size == 1) "Deleted" else "Deleted ${action.todos.size} todos"
+            is UndoableAction.Snooze -> "Snoozed"
+            is UndoableAction.Complete -> "Completed"
+            null -> ""
+        }
         _undoVisible.value = true
         undoExpiryJob?.cancel()
         undoExpiryJob = viewModelScope.launch {

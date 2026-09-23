@@ -1,29 +1,45 @@
 package io.hafa.latr.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.NextWeek
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.LightMode
-import androidx.compose.material.icons.filled.Nightlight
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Today
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.rounded.NextWeek
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.DateRange
+import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Nightlight
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Today
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,7 +55,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.hafa.latr.ui.theme.LatrTheme
@@ -57,11 +76,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.delay
 
-private sealed class CustomPickerState {
-    data object Hidden : CustomPickerState()
-    data object ShowingDatePicker : CustomPickerState()
-    data class ShowingTimePicker(val selectedDate: LocalDate) : CustomPickerState()
-}
+private enum class SheetStep { MENU, DATE, TIME }
 
 /** One rendered menu row: a learned suggestion, the persisted "Last" custom pick, or "Custom". */
 private sealed class MenuRow {
@@ -93,6 +108,7 @@ fun SnoozeBottomSheet(
     onSnoozeSelected: (isoDateTime: String, source: String, pickedKey: String?) -> Boolean,
     partitions: List<SnoozeStatsSnapshot>,
     modifier: Modifier = Modifier,
+    todoText: String = "",
     initialNow: Instant? = null,
     zone: ZoneId = ZoneId.systemDefault(),
 ) {
@@ -106,8 +122,17 @@ fun SnoozeBottomSheet(
     }
     val rows = remember(now, partitions, zone) { buildMenuRows(partitions, now, zone) }
     val quickTimes = remember(now, partitions) { SnoozeSuggestions.quickTimes(partitions, now) }
-
-    var customPickerState by remember { mutableStateOf<CustomPickerState>(CustomPickerState.Hidden) }
+    var step by remember { mutableStateOf(SheetStep.MENU) }
+    val today = LocalDate.ofInstant(now, zone)
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = PickerDates.initialPickerMillis(
+            SnoozeSuggestions.defaultCustomDate(LocalDateTime.ofInstant(now, zone))
+        ),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                !PickerDates.pickerMillisToDate(utcTimeMillis).isBefore(LocalDate.now(zone))
+        }
+    )
 
     val pick = { epochMillis: Long, source: String, pickedKey: String? ->
         if (onSnoozeSelected(LocalDateTimeUtil.fromEpochMillis(epochMillis, zone), source, pickedKey)) {
@@ -120,185 +145,167 @@ fun SnoozeBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        dragHandle = null,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
         modifier = modifier
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-        ) {
-            rows.forEach { row ->
-                MenuRowItem(
-                    row = row,
-                    now = now,
-                    zone = zone,
-                    onClick = {
-                        when (row) {
-                            is MenuRow.Custom -> customPickerState = CustomPickerState.ShowingDatePicker
-                            is MenuRow.Suggestion -> pick(row.row.epochMillis, "suggestion", row.row.key)
-                            is MenuRow.Last -> pick(row.epochMillis, "last", null)
-                        }
-                    }
-                )
-            }
+        BackHandler(enabled = step != SheetStep.MENU) {
+            step = if (step == SheetStep.TIME) SheetStep.DATE else SheetStep.MENU
         }
-    }
-
-    when (val state = customPickerState) {
-        CustomPickerState.Hidden -> { /* nothing */
-        }
-
-        CustomPickerState.ShowingDatePicker -> {
-            DatePickerSheet(
-                quickTimes = quickTimes,
-                now = now,
-                zone = zone,
-                onDismiss = { customPickerState = CustomPickerState.Hidden },
-                onDateSelected = { date -> customPickerState = CustomPickerState.ShowingTimePicker(date) },
-                onQuickTime = { epochMillis -> pick(epochMillis, "custom", null) }
-            )
-        }
-
-        is CustomPickerState.ShowingTimePicker -> {
-            TimePickerSheet(
-                selectedDate = state.selectedDate,
-                quickTimes = quickTimes,
-                now = now,
-                zone = zone,
-                onDismiss = { customPickerState = CustomPickerState.Hidden },
-                onConfirm = { epochMillis -> pick(epochMillis, "custom", null) }
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DatePickerSheet(
-    quickTimes: List<QuickTime>,
-    now: Instant,
-    zone: ZoneId,
-    onDismiss: () -> Unit,
-    onDateSelected: (LocalDate) -> Unit,
-    onQuickTime: (epochMillis: Long) -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = null
-    ) {
-        DatePickerSheetContent(
-            quickTimes = quickTimes,
-            now = now,
-            zone = zone,
-            onDateSelected = onDateSelected,
-            onQuickTime = onQuickTime
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DatePickerSheetContent(
-    quickTimes: List<QuickTime>,
-    now: Instant,
-    zone: ZoneId,
-    onDateSelected: (LocalDate) -> Unit,
-    onQuickTime: (epochMillis: Long) -> Unit
-) {
-    val today = LocalDate.ofInstant(now, zone)
-    val datePickerState = rememberDatePickerState(
-        initialSelectedDateMillis = PickerDates.initialPickerMillis(today),
-        selectableDates = object : SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                !PickerDates.pickerMillisToDate(utcTimeMillis).isBefore(today)
-        }
-    )
-    val selectedDate = datePickerState.selectedDateMillis?.let { PickerDates.pickerMillisToDate(it) }
-
-    Column(
-        modifier = Modifier.padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("Pick a date", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(16.dp))
-
-        DatePicker(state = datePickerState, showModeToggle = false, title = null)
-
-        if (quickTimes.isNotEmpty()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+        AnimatedContent(
+            targetState = step,
+            transitionSpec = {
+                val forward = targetState.ordinal > initialState.ordinal
+                (slideInHorizontally { if (forward) it / 4 else -it / 4 } + fadeIn()) togetherWith
+                    (slideOutHorizontally { if (forward) -it / 4 else it / 4 } + fadeOut())
+            },
+            label = "snoozeStep",
+        ) { current ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
             ) {
-                quickTimes.forEach { quickTime ->
-                    val epoch = SnoozeSuggestions.quickTimeEpoch(selectedDate ?: today, quickTime.clockMinutes, zone)
-                    TextButton(
-                        onClick = { onQuickTime(epoch) },
-                        enabled = selectedDate != null && epoch > now.toEpochMilli(),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(SnoozeSuggestions.formatClock(epoch, zone))
+                when (current) {
+                    SheetStep.MENU -> MenuStep(
+                        rows = rows,
+                        todoText = todoText,
+                        now = now,
+                        zone = zone,
+                        onRow = { row ->
+                            when (row) {
+                                is MenuRow.Custom -> step = SheetStep.DATE
+                                is MenuRow.Suggestion -> pick(row.row.epochMillis, "suggestion", row.row.key)
+                                is MenuRow.Last -> pick(row.epochMillis, "last", null)
+                            }
+                        },
+                    )
+
+                    SheetStep.DATE -> DateStep(
+                        datePickerState = datePickerState,
+                        todoText = todoText,
+                        quickTimes = quickTimes,
+                        now = now,
+                        zone = zone,
+                        onBack = { step = SheetStep.MENU },
+                        onQuickTime = { epochMillis -> pick(epochMillis, "custom", null) },
+                        onOtherTime = { step = SheetStep.TIME },
+                    )
+
+                    SheetStep.TIME -> {
+                        val selectedDate = datePickerState.selectedDateMillis
+                            ?.let { PickerDates.pickerMillisToDate(it) } ?: today
+                        TimeStep(
+                            selectedDate = selectedDate,
+                            todoText = todoText,
+                            quickTimes = quickTimes,
+                            now = now,
+                            zone = zone,
+                            onBack = { step = SheetStep.DATE },
+                            onConfirm = { epochMillis -> pick(epochMillis, "custom", null) },
+                        )
                     }
                 }
             }
         }
+    }
+}
 
-        Row(
-            horizontalArrangement = Arrangement.End,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            TextButton(
-                onClick = { selectedDate?.let { onDateSelected(it) } },
-                enabled = selectedDate != null
-            ) {
-                Text("Custom time")
+@Composable
+private fun SheetHeader(title: String, todoText: String, onBack: (() -> Unit)? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = if (onBack == null) 24.dp else 8.dp, end = 24.dp, top = 4.dp, bottom = 8.dp)
+    ) {
+        if (onBack != null) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
             }
         }
-
-        Spacer(modifier = Modifier.height(32.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleLarge)
+            if (todoText.isNotBlank()) {
+                Text(
+                    todoText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimePickerSheet(
-    selectedDate: LocalDate,
-    quickTimes: List<QuickTime>,
+private fun MenuStep(
+    rows: List<MenuRow>,
+    todoText: String,
     now: Instant,
     zone: ZoneId,
-    onDismiss: () -> Unit,
-    onConfirm: (epochMillis: Long) -> Unit
+    onRow: (MenuRow) -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = null
-    ) {
-        TimePickerSheetContent(
-            selectedDate = selectedDate,
-            quickTimes = quickTimes,
-            now = now,
-            zone = zone,
-            onDismiss = onDismiss,
-            onConfirm = onConfirm
-        )
+    SheetHeader(title = "Snooze", todoText = todoText)
+    rows.forEach { row ->
+        MenuRowItem(row = row, now = now, zone = zone, onClick = { onRow(row) })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimePickerSheetContent(
-    selectedDate: LocalDate,
+private fun DateStep(
+    datePickerState: DatePickerState,
+    todoText: String,
     quickTimes: List<QuickTime>,
     now: Instant,
     zone: ZoneId,
-    onDismiss: () -> Unit,
-    onConfirm: (epochMillis: Long) -> Unit
+    onBack: () -> Unit,
+    onQuickTime: (epochMillis: Long) -> Unit,
+    onOtherTime: () -> Unit,
+) {
+    val selectedDate = datePickerState.selectedDateMillis?.let { PickerDates.pickerMillisToDate(it) }
+    SheetHeader(title = "Pick a date", todoText = todoText, onBack = onBack)
+    DatePicker(state = datePickerState, showModeToggle = false, title = null, headline = null)
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        quickTimes.forEach { quickTime ->
+            val epoch = selectedDate?.let { SnoozeSuggestions.quickTimeEpoch(it, quickTime.clockMinutes, zone) }
+            OutlinedButton(
+                onClick = { epoch?.let(onQuickTime) },
+                enabled = epoch != null && epoch > now.toEpochMilli(),
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    LocalTime.of(quickTime.clockMinutes / 60, quickTime.clockMinutes % 60).toString(),
+                    style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum"),
+                    maxLines = 1,
+                )
+            }
+        }
+        if (quickTimes.isEmpty()) Box(Modifier.weight(1f))
+        TextButton(onClick = onOtherTime, enabled = selectedDate != null) {
+            Text("Other time")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TimeStep(
+    selectedDate: LocalDate,
+    todoText: String,
+    quickTimes: List<QuickTime>,
+    now: Instant,
+    zone: ZoneId,
+    onBack: () -> Unit,
+    onConfirm: (epochMillis: Long) -> Unit,
 ) {
     val initialTime = remember(selectedDate) {
         val best = quickTimes.maxByOrNull { it.weight }
@@ -316,25 +323,20 @@ private fun TimePickerSheetContent(
     val selectedEpoch = LocalDateTime.of(selectedDate, LocalTime.of(timePickerState.hour, timePickerState.minute))
         .atZone(zone).toInstant().toEpochMilli()
 
+    SheetHeader(title = "Pick a time", todoText = todoText, onBack = onBack)
     Column(
-        modifier = Modifier.padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
     ) {
-        Text("Pick a time", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(16.dp))
-
         TimePicker(state = timePickerState)
-
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-            TextButton(
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Button(
                 onClick = { onConfirm(selectedEpoch) },
                 enabled = selectedEpoch > now.toEpochMilli()
-            ) { Text("Confirm") }
+            ) { Text("Snooze") }
         }
-
-        Spacer(modifier = Modifier.height(32.dp))
     }
 }
 
@@ -345,36 +347,70 @@ private fun MenuRowItem(
     zone: ZoneId,
     onClick: () -> Unit
 ) {
-    val label = when (row) {
-        is MenuRow.Suggestion -> row.row.label
-        is MenuRow.Last -> SnoozeSuggestions.lastLabel(row.epochMillis, zone)
-        is MenuRow.Custom -> "Custom"
+    val colorScheme = MaterialTheme.colorScheme
+    val (label, time) = when (row) {
+        is MenuRow.Suggestion ->
+            SnoozeSuggestions.labelText(row.row.key, row.row.epochMillis, now, zone) to
+                SnoozeSuggestions.formatClock(row.row.epochMillis, zone)
+        is MenuRow.Last -> SnoozeSuggestions.lastText(row.epochMillis, zone) to
+            SnoozeSuggestions.formatClock(row.epochMillis, zone)
+        is MenuRow.Custom -> "Pick a date & time" to null
     }
-    ListItem(
-        headlineContent = { Text(label) },
-        leadingContent = {
-            Icon(
-                imageVector = row.icon(now, zone),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+    val (tile, ink) = when (row) {
+        is MenuRow.Suggestion -> colorScheme.tertiaryContainer to colorScheme.onTertiaryContainer
+        else -> colorScheme.surfaceContainerHigh to colorScheme.onSurfaceVariant
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(40.dp)
+                .background(tile, CircleShape)
+        ) {
+            Icon(row.icon(now, zone), contentDescription = null, tint = ink, modifier = Modifier.size(20.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        if (time != null) {
+            Text(
+                time,
+                style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum"),
+                color = colorScheme.onSurfaceVariant,
             )
-        },
-        modifier = Modifier.clickable(onClick = onClick)
-    )
+        } else {
+            Icon(
+                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 private fun MenuRow.icon(now: Instant, zone: ZoneId): ImageVector = when (this) {
     is MenuRow.Suggestion -> when (SnoozeSuggestions.rowIcon(row.key, row.epochMillis, now, zone)) {
-        RowIcon.OFFSET -> Icons.Default.Schedule
-        RowIcon.TODAY_DAY -> Icons.Default.LightMode
-        RowIcon.TODAY_NIGHT -> Icons.Default.Nightlight
-        RowIcon.TOMORROW -> Icons.Default.Today
-        RowIcon.DAYS -> Icons.Default.DateRange
-        RowIcon.WEEKDAY -> Icons.AutoMirrored.Filled.NextWeek
-        RowIcon.MONTHLY -> Icons.Default.Event
+        RowIcon.OFFSET -> Icons.Rounded.Schedule
+        RowIcon.TODAY_DAY -> Icons.Rounded.LightMode
+        RowIcon.TODAY_NIGHT -> Icons.Rounded.Nightlight
+        RowIcon.TOMORROW -> Icons.Rounded.Today
+        RowIcon.DAYS -> Icons.Rounded.DateRange
+        RowIcon.WEEKDAY -> Icons.AutoMirrored.Rounded.NextWeek
+        RowIcon.MONTHLY -> Icons.Rounded.Event
     }
-    is MenuRow.Last -> Icons.Default.History
-    is MenuRow.Custom -> Icons.Default.CalendarMonth
+    is MenuRow.Last -> Icons.Rounded.History
+    is MenuRow.Custom -> Icons.Rounded.CalendarMonth
 }
 
 @Preview(showBackground = true, name = "Empty - no history yet")
@@ -382,7 +418,7 @@ private fun MenuRow.icon(now: Instant, zone: ZoneId): ImageVector = when (this) 
 private fun SnoozeBottomSheetPreview_Empty() {
     val now = LocalDateTime.of(2024, 1, 15, 6, 0)
         .atZone(ZoneId.systemDefault()).toInstant()
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         SnoozeOptionsPreviewContent(now = now, partitions = emptyList())
     }
 }
@@ -391,7 +427,7 @@ private fun SnoozeBottomSheetPreview_Empty() {
 @Composable
 private fun SnoozeBottomSheetPreview_LearnedHabit() {
     val zone = ZoneId.systemDefault()
-    var stats = io.hafa.latr.util.SnoozeStatsSnapshot()
+    var stats = SnoozeStatsSnapshot()
     var day = LocalDateTime.of(2024, 1, 1, 10, 0)
     repeat(20) {
         val at = day.atZone(zone).toInstant()
@@ -401,7 +437,7 @@ private fun SnoozeBottomSheetPreview_LearnedHabit() {
         day = day.plusDays(1)
     }
     val now = day.atZone(zone).toInstant()
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         SnoozeOptionsPreviewContent(now = now, partitions = listOf(stats))
     }
 }
@@ -413,47 +449,12 @@ private fun SnoozeOptionsPreviewContent(
 ) {
     val zone = ZoneId.systemDefault()
     val rows = buildMenuRows(partitions, now, zone)
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(Color.Transparent)
             .padding(vertical = 16.dp)
     ) {
-        rows.forEach { row ->
-            MenuRowItem(row = row, now = now, zone = zone, onClick = {})
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Preview(showBackground = true, name = "Date Picker Sheet")
-@Composable
-private fun DatePickerSheetPreview() {
-    val zone = ZoneId.systemDefault()
-    val now = Instant.now()
-    LatrTheme {
-        DatePickerSheetContent(
-            quickTimes = listOf(QuickTime(9 * 60, 3.0), QuickTime(21 * 60 + 30, 1.0)),
-            now = now,
-            zone = zone,
-            onDateSelected = {},
-            onQuickTime = {}
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Preview(showBackground = true, name = "Time Picker Sheet")
-@Composable
-private fun TimePickerSheetPreview() {
-    LatrTheme {
-        TimePickerSheetContent(
-            selectedDate = LocalDate.now().plusDays(1),
-            quickTimes = emptyList(),
-            now = Instant.now(),
-            zone = ZoneId.systemDefault(),
-            onDismiss = {},
-            onConfirm = {}
-        )
+        MenuStep(rows = rows, todoText = "Email Sam about the lease renewal", now = now, zone = zone, onRow = {})
     }
 }
