@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactElement, useMemo } from "react";
+import { type ReactElement, type ReactNode, useMemo } from "react";
 import { groupForFilter } from "../utils/group";
 import { useTodos } from "../utils/store";
 import {
@@ -9,6 +9,7 @@ import {
   rankBySearch,
   sortForFilter,
 } from "../utils/todo";
+import Logo from "./logo";
 import TodoRow from "./todo-row";
 
 export default function TodoList(): ReactElement {
@@ -31,22 +32,29 @@ export default function TodoList(): ReactElement {
   }, [todos, filter, search, now]);
 
   if (total === 0) {
+    const searching = search.trim().length > 0;
+    const { title, hint } = searching
+      ? { title: `No todos match “${search}”`, hint: "Try fewer words." }
+      : emptyCopy(filter);
     return (
-      <div className="text-center text-muted py-20 text-sm">
-        {search.trim().length > 0
-          ? `No todos match “${search}”`
-          : emptyLabel(filter)}
+      <div className="flex flex-col items-center text-center py-20 gap-2">
+        <Logo className="w-8 h-10 text-border mb-2" />
+        <div className="text-[15px] text-text">{title}</div>
+        <div className="text-[13px] text-text-secondary">{hint}</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {groups.map((group) => (
         <section key={group.label || "search"}>
           {group.label && (
-            <div className="px-3 pb-1 text-xs font-medium uppercase tracking-wider text-muted">
-              {group.label}
+            <div className="flex gap-2 px-3 pb-1.5 text-[12.5px] font-semibold text-text-secondary">
+              <span>{group.label}</span>
+              <span className="font-normal text-muted tabular-nums">
+                {group.todos.length}
+              </span>
             </div>
           )}
           <div className="space-y-0.5">
@@ -60,15 +68,46 @@ export default function TodoList(): ReactElement {
   );
 }
 
-function emptyLabel(filter: Filter): string {
+export function ListSkeleton(): ReactElement {
+  const widths = ["w-3/5", "w-2/5", "w-4/5", "w-1/2", "w-2/3"];
+  return (
+    <div
+      className="space-y-0.5"
+      role="status"
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      {widths.map((w) => (
+        <div
+          key={w}
+          className="flex items-center gap-3 min-h-10 max-md:min-h-14 px-3"
+        >
+          <div className="w-[18px] h-[18px] rounded-full bg-surface-hover animate-shimmer" />
+          <div
+            className={`h-3 rounded-full bg-surface-hover animate-shimmer ${w}`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const ADD_HINT = (
+  <>
+    <span className="hidden md:inline">Press n to add one.</span>
+    <span className="md:hidden">Tap + to add one.</span>
+  </>
+);
+
+function emptyCopy(filter: Filter): { title: string; hint: ReactNode } {
   switch (filter) {
     case "ACTIVE":
-      return "Nothing to do.";
+      return { title: "Nothing to do.", hint: ADD_HINT };
     case "SNOOZED":
-      return "Nothing snoozed.";
+      return { title: "Nothing snoozed.", hint: "Snoozed todos wait here." };
     case "DONE":
-      return "Nothing done yet.";
+      return { title: "Nothing done yet.", hint: "Completed todos land here." };
     case "ALL":
-      return "No todos.";
+      return { title: "No todos.", hint: ADD_HINT };
   }
 }

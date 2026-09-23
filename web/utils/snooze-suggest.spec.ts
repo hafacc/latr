@@ -10,18 +10,25 @@ import {
   emptyPartition,
   extractKeys,
   labelFor,
+  labelParts,
   lastRow,
   quickTimeEpoch,
   quickTimeSlot,
   quickTimes,
+  type Row,
   rank,
   resolveKey,
+  rowIcon,
   type SnoozeSource,
   undoCommit,
 } from "./snooze-suggest";
 
 function at(y: number, m: number, d: number, h = 0, mi = 0): Date {
   return new Date(y, m - 1, d, h, mi, 0, 0);
+}
+
+function labelsOf(rows: Row[], now: number): string[] {
+  return rows.map((r) => labelFor(r.keyId, r.time, new Date(now)));
 }
 
 describe("canonicalSetId", () => {
@@ -160,9 +167,8 @@ describe("commit / decay", () => {
       at(2024, 3, 6, 20).getTime(),
       "custom",
     ).next;
-    const labels = rank([p], at(2024, 3, 7, 10, 0).getTime()).map(
-      (r) => r.label,
-    );
+    const labelNow = at(2024, 3, 7, 10, 0).getTime();
+    const labels = labelsOf(rank([p], labelNow), labelNow);
     expect(labels).toContain("Tomorrow morning, 09:00");
     expect(labels).toContain("Tomorrow evening, 20:00");
   });
@@ -216,7 +222,7 @@ describe("rank — Sunday -> Monday attribution (motivating example)", () => {
     const now = at(2024, 3, 3, 10, 0).getTime(); // a Sunday
     const rows = rank([p], now);
     expect(rows).toHaveLength(1);
-    expect(rows[0].label).toContain("Tomorrow");
+    expect(labelsOf(rows, now)[0]).toContain("Tomorrow");
   });
 
   test("on a tie tomorrow beats the weekday reading, and the weekday shows once tomorrow is a different day", () => {
@@ -226,9 +232,10 @@ describe("rank — Sunday -> Monday attribution (motivating example)", () => {
       at(2026, 9, 17, 9, 0).getTime(),
       "custom",
     ).next;
-    const wednesday = rank([p], at(2026, 9, 23, 10, 0).getTime());
+    const wedNow = at(2026, 9, 23, 10, 0).getTime();
+    const wednesday = rank([p], wedNow);
     expect(wednesday.map((r) => r.keyId)).toEqual(["D1@0900"]);
-    expect(wednesday[0].label).toBe("Tomorrow morning, 09:00");
+    expect(labelsOf(wednesday, wedNow)[0]).toBe("Tomorrow morning, 09:00");
 
     const thursday = rank([p], at(2026, 9, 24, 7, 0).getTime());
     expect(thursday.map((r) => r.keyId)).toEqual(["D1@0900"]);
@@ -305,7 +312,7 @@ describe("rank — a lone one-off stays visible next to a strong habit", () => {
 
     const now = at(2027, 3, 25, 10, 0).getTime();
     const rows = rank([p], now, 5);
-    expect(rows.some((r) => r.label.includes("1st"))).toBe(true);
+    expect(labelsOf(rows, now).some((l) => l.includes("1st"))).toBe(true);
   });
 });
 
@@ -408,7 +415,7 @@ describe("labelFor", () => {
         "D0@1510__D0_h3": { c: 1, t },
       },
     });
-    expect(rank([p], now).map((r) => r.label)).toEqual([
+    expect(labelsOf(rank([p], now), now)).toEqual([
       "In a little while (13:00)",
       "In a little while (15:00)",
     ]);
@@ -626,7 +633,15 @@ describe("lastRow", () => {
     };
     expect(lastRow([p], now, [])).not.toBeNull();
 
-    const covering = [{ time: future, label: "x", keyId: "k", score: 1 }];
+    const covering = [
+      {
+        time: future,
+        text: "x",
+        icon: "days" as const,
+        keyId: "k",
+        score: 1,
+      },
+    ];
     expect(lastRow([p], now, covering)).toBeNull();
 
     const past = {
@@ -698,5 +713,33 @@ describe("classH", () => {
     expect(classH("Dom1@0900")).toBe(60);
     expect(classH("DomL@0900")).toBe(60);
     expect(classH("Mo1@0900")).toBe(60);
+  });
+});
+
+describe("row icons and label parts (mirror Android rowIcon)", () => {
+  const noon = at(2026, 9, 21, 12, 0);
+  const icon = (key: string, resolved: Date) =>
+    rowIcon(key, resolved.getTime(), noon);
+
+  test("icon follows the resolved day and time", () => {
+    expect(icon("D0@2300", at(2026, 9, 21, 23, 0))).toBe("todayNight");
+    expect(icon("D0@1500", at(2026, 9, 21, 15, 0))).toBe("todayDay");
+    expect(icon("D1@0900", at(2026, 9, 22, 9, 0))).toBe("tomorrow");
+    expect(icon("D3@0900", at(2026, 9, 24, 9, 0))).toBe("days");
+    expect(icon("Wd5@0900", at(2026, 9, 25, 9, 0))).toBe("weekday");
+    expect(icon("Dom1@0900", at(2026, 10, 1, 9, 0))).toBe("monthly");
+    expect(icon("D0_h3", at(2026, 9, 21, 15, 0))).toBe("offset");
+  });
+
+  test("text drops the time and labelFor recombines it", () => {
+    const t = at(2026, 9, 22, 9, 0).getTime();
+    expect(labelParts("D1@0900", t, noon)).toEqual({
+      text: "Tomorrow morning",
+      time: "09:00",
+      parenthesized: false,
+    });
+    const soon = at(2026, 9, 21, 15, 0).getTime();
+    expect(labelParts("D0_h3", soon, noon).text).toBe("In a little while");
+    expect(labelFor("D0_h3", soon, noon)).toBe("In a little while (15:00)");
   });
 });
