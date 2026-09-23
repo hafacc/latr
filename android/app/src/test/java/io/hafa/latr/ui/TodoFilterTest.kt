@@ -193,6 +193,13 @@ class TodoFilterTest {
     }
 
     @Test
+    fun `search matches through inline style markers`() {
+        val italic = todo(id = "italic", text = "buy _milk_")
+        val bold = todo(id = "bold", text = "*milk* run")
+        assertEquals(setOf("italic", "bold"), listOf(italic, bold).sorted(StatusFilter.ACTIVE, "milk").toSet())
+    }
+
+    @Test
     fun `blank searchQuery is a no-op (keeps sorted order)`() {
         val a = todo(id = "a", modifiedAt = 100)
         val b = todo(id = "b", modifiedAt = 200)

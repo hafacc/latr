@@ -226,10 +226,11 @@ private fun SheetHeader(title: String, todoText: String, onBack: (() -> Unit)? =
         Column {
             Text(title, style = MaterialTheme.typography.titleLarge)
             if (todoText.isNotBlank()) {
+                val color = MaterialTheme.colorScheme.onSurfaceVariant
                 Text(
-                    todoText,
+                    remember(todoText, color) { styledTodoText(todoText, color) },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = color,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
