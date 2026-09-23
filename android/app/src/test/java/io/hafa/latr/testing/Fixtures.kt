@@ -3,15 +3,17 @@ package io.hafa.latr.testing
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** The cross-platform fixture in `testdata/snooze-fixtures.json`, shared with web's specs. */
+/** Cross-platform fixtures in `testdata/`, shared with web's specs. */
 object Fixtures {
-    val snooze: Map<String, Any?> by lazy {
-        val text = requireNotNull(javaClass.classLoader?.getResourceAsStream("snooze-fixtures.json")) {
-            "testdata/snooze-fixtures.json missing from test resources"
+    fun load(name: String): Map<String, Any?> {
+        val text = requireNotNull(javaClass.classLoader?.getResourceAsStream(name)) {
+            "testdata/$name missing from test resources"
         }.bufferedReader().use { it.readText() }
         @Suppress("UNCHECKED_CAST")
-        (plain(JSONObject(text)) as Map<String, Any?>)
+        return plain(JSONObject(text)) as Map<String, Any?>
     }
+
+    val snooze: Map<String, Any?> by lazy { load("snooze-fixtures.json") }
 
     private fun plain(value: Any?): Any? = when (value) {
         is JSONObject -> value.keys().asSequence().associateWith { plain(value.get(it)) }
