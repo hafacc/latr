@@ -23,15 +23,15 @@ object LocalDateTimeUtil {
     fun formatSnoozeTime(epochMillis: Long, context: Context): String {
         val now = System.currentTimeMillis()
         val hoursDelta = abs(epochMillis - now) / (1000 * 60 * 60)
+        val timeStr = SnoozeSuggestions.formatClock(epochMillis, ZoneId.systemDefault())
         return if (hoursDelta < 24) {
-            DateUtils.formatDateTime(context, epochMillis, DateUtils.FORMAT_SHOW_TIME)
+            timeStr
         } else {
             val dateStr = DateUtils.formatDateTime(
                 context,
                 epochMillis,
                 DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_ALL
             )
-            val timeStr = DateUtils.formatDateTime(context, epochMillis, DateUtils.FORMAT_SHOW_TIME)
             "$dateStr at $timeStr"
         }
     }

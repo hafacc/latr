@@ -11,12 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.NextWeek
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Today
-import androidx.compose.material.icons.filled.Weekend
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -31,6 +32,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,18 +40,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.hafa.latr.ui.theme.LatrTheme
 import io.hafa.latr.util.LocalDateTimeUtil
-import io.hafa.latr.util.SnoozeOption
-import io.hafa.latr.util.SnoozeTimeCalculator
+import io.hafa.latr.util.PickerDates
+import io.hafa.latr.util.QuickTime
+import io.hafa.latr.util.RowIcon
+import io.hafa.latr.util.SnoozeRow
+import io.hafa.latr.util.SnoozeStatsSnapshot
+import io.hafa.latr.util.SnoozeSuggestions
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlinx.coroutines.delay
 
 private sealed class CustomPickerState {
     data object Hidden : CustomPickerState()
@@ -57,31 +63,59 @@ private sealed class CustomPickerState {
     data class ShowingTimePicker(val selectedDate: LocalDate) : CustomPickerState()
 }
 
+/** One rendered menu row: a learned suggestion, the persisted "Last" custom pick, or "Custom". */
+private sealed class MenuRow {
+    data class Suggestion(val row: SnoozeRow) : MenuRow()
+    data class Last(val epochMillis: Long) : MenuRow()
+    data object Custom : MenuRow()
+}
+
+private const val MENU_CLOCK_TICK_MS = 30_000L
+
+private fun buildMenuRows(
+    partitions: List<SnoozeStatsSnapshot>,
+    now: Instant,
+    zone: ZoneId,
+): List<MenuRow> {
+    val suggestions = SnoozeSuggestions.rank(partitions, now, zone)
+    val rows = mutableListOf<MenuRow>()
+    rows += suggestions.map { MenuRow.Suggestion(it) }
+    SnoozeSuggestions.lastRow(partitions, now, suggestions)?.let { rows += MenuRow.Last(it) }
+    rows += MenuRow.Custom
+    return rows
+}
+
+/** [onSnoozeSelected] returns false if the pick was rejected (its time already passed); the sheet then stays open with refreshed rows. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SnoozeBottomSheet(
     onDismiss: () -> Unit,
-    onSnoozeSelected: (isoDateTime: String) -> Unit,
-    onCustomTimeSelected: (isoDateTime: String) -> Unit,
-    lastCustomSnoozeTime: String?,
+    onSnoozeSelected: (isoDateTime: String, source: String, pickedKey: String?) -> Boolean,
+    partitions: List<SnoozeStatsSnapshot>,
     modifier: Modifier = Modifier,
-    morningMinutes: Int = 480,
-    eveningMinutes: Int = 1200,
-    onSetPreferredTime: (Int) -> Unit = {},
-    now: Instant = Instant.now()
+    initialNow: Instant? = null,
+    zone: ZoneId = ZoneId.systemDefault(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val options = remember(now, lastCustomSnoozeTime, morningMinutes, eveningMinutes) {
-        SnoozeTimeCalculator.getSnoozeOptions(
-            now,
-            lastCustomSnoozeTime,
-            morningMinutes,
-            eveningMinutes
-        )
+    var now by remember { mutableStateOf(initialNow ?: Instant.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(MENU_CLOCK_TICK_MS)
+            now = Instant.now()
+        }
     }
+    val rows = remember(now, partitions, zone) { buildMenuRows(partitions, now, zone) }
+    val quickTimes = remember(now, partitions) { SnoozeSuggestions.quickTimes(partitions, now) }
 
     var customPickerState by remember { mutableStateOf<CustomPickerState>(CustomPickerState.Hidden) }
-    val setPickerState = { state: CustomPickerState -> customPickerState = state }
+
+    val pick = { epochMillis: Long, source: String, pickedKey: String? ->
+        if (onSnoozeSelected(LocalDateTimeUtil.fromEpochMillis(epochMillis, zone), source, pickedKey)) {
+            onDismiss()
+        } else {
+            now = Instant.now()
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -94,19 +128,16 @@ fun SnoozeBottomSheet(
                 .fillMaxWidth()
                 .padding(bottom = 32.dp)
         ) {
-            options.forEach { option ->
-                SnoozeOptionItem(
-                    option = option,
+            rows.forEach { row ->
+                MenuRowItem(
+                    row = row,
+                    now = now,
+                    zone = zone,
                     onClick = {
-                        when (option) {
-                            is SnoozeOption.Custom -> {
-                                setPickerState(CustomPickerState.ShowingDatePicker)
-                            }
-
-                            else -> {
-                                onSnoozeSelected(LocalDateTimeUtil.fromEpochMillis(option.epochMillis))
-                                onDismiss()
-                            }
+                        when (row) {
+                            is MenuRow.Custom -> customPickerState = CustomPickerState.ShowingDatePicker
+                            is MenuRow.Suggestion -> pick(row.row.epochMillis, "suggestion", row.row.key)
+                            is MenuRow.Last -> pick(row.epochMillis, "last", null)
                         }
                     }
                 )
@@ -120,33 +151,23 @@ fun SnoozeBottomSheet(
 
         CustomPickerState.ShowingDatePicker -> {
             DatePickerSheet(
-                onDismiss = { setPickerState(CustomPickerState.Hidden) },
-                onDateSelected = { date ->
-                    setPickerState(CustomPickerState.ShowingTimePicker(date))
-                },
-                morningMinutes = morningMinutes,
-                eveningMinutes = eveningMinutes,
-                onDateAndTimeSelected = { epochMillis ->
-                    val isoDateTime = LocalDateTimeUtil.fromEpochMillis(epochMillis)
-                    onCustomTimeSelected(isoDateTime)
-                    onSnoozeSelected(isoDateTime)
-                    onDismiss()
-                }
+                quickTimes = quickTimes,
+                now = now,
+                zone = zone,
+                onDismiss = { customPickerState = CustomPickerState.Hidden },
+                onDateSelected = { date -> customPickerState = CustomPickerState.ShowingTimePicker(date) },
+                onQuickTime = { epochMillis -> pick(epochMillis, "custom", null) }
             )
         }
 
         is CustomPickerState.ShowingTimePicker -> {
             TimePickerSheet(
                 selectedDate = state.selectedDate,
-                morningMinutes = morningMinutes,
-                onSetPreferredTime = onSetPreferredTime,
-                onDismiss = { setPickerState(CustomPickerState.Hidden) },
-                onConfirm = { epochMillis ->
-                    val isoDateTime = LocalDateTimeUtil.fromEpochMillis(epochMillis)
-                    onCustomTimeSelected(isoDateTime)
-                    onSnoozeSelected(isoDateTime)
-                    onDismiss()
-                }
+                quickTimes = quickTimes,
+                now = now,
+                zone = zone,
+                onDismiss = { customPickerState = CustomPickerState.Hidden },
+                onConfirm = { epochMillis -> pick(epochMillis, "custom", null) }
             )
         }
     }
@@ -155,11 +176,12 @@ fun SnoozeBottomSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DatePickerSheet(
+    quickTimes: List<QuickTime>,
+    now: Instant,
+    zone: ZoneId,
     onDismiss: () -> Unit,
     onDateSelected: (LocalDate) -> Unit,
-    morningMinutes: Int,
-    eveningMinutes: Int,
-    onDateAndTimeSelected: (epochMillis: Long) -> Unit
+    onQuickTime: (epochMillis: Long) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -169,10 +191,11 @@ private fun DatePickerSheet(
         dragHandle = null
     ) {
         DatePickerSheetContent(
+            quickTimes = quickTimes,
+            now = now,
+            zone = zone,
             onDateSelected = onDateSelected,
-            morningMinutes = morningMinutes,
-            eveningMinutes = eveningMinutes,
-            onDateAndTimeSelected = onDateAndTimeSelected
+            onQuickTime = onQuickTime
         )
     }
 }
@@ -180,33 +203,21 @@ private fun DatePickerSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DatePickerSheetContent(
+    quickTimes: List<QuickTime>,
+    now: Instant,
+    zone: ZoneId,
     onDateSelected: (LocalDate) -> Unit,
-    morningMinutes: Int,
-    eveningMinutes: Int,
-    onDateAndTimeSelected: (epochMillis: Long) -> Unit
+    onQuickTime: (epochMillis: Long) -> Unit
 ) {
-    val today = LocalDate.now()
+    val today = LocalDate.ofInstant(now, zone)
     val datePickerState = rememberDatePickerState(
-        initialSelectedDateMillis = today.atStartOfDay(ZoneId.systemDefault())
-            .toInstant().toEpochMilli(),
+        initialSelectedDateMillis = PickerDates.initialPickerMillis(today),
         selectableDates = object : SelectableDates {
-            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                val date = Instant.ofEpochMilli(utcTimeMillis)
-                    .atZone(ZoneId.of("UTC")).toLocalDate()
-                return !date.isBefore(today)
-            }
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                !PickerDates.pickerMillisToDate(utcTimeMillis).isBefore(today)
         }
     )
-
-    val selectedDate = datePickerState.selectedDateMillis?.let { millis ->
-        Instant.ofEpochMilli(millis).atZone(ZoneId.of("UTC")).toLocalDate()
-    }
-    val isToday = selectedDate == today
-    val now = LocalTime.now()
-    val morningTime = LocalTime.of(morningMinutes / 60, morningMinutes % 60)
-    val eveningTime = LocalTime.of(eveningMinutes / 60, eveningMinutes % 60)
-    val morningEnabled = selectedDate != null && !(isToday && !morningTime.isAfter(now))
-    val eveningEnabled = selectedDate != null && !(isToday && !eveningTime.isAfter(now))
+    val selectedDate = datePickerState.selectedDateMillis?.let { PickerDates.pickerMillisToDate(it) }
 
     Column(
         modifier = Modifier.padding(16.dp),
@@ -217,48 +228,33 @@ private fun DatePickerSheetContent(
 
         DatePicker(state = datePickerState, showModeToggle = false, title = null)
 
+        if (quickTimes.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                quickTimes.forEach { quickTime ->
+                    val epoch = SnoozeSuggestions.quickTimeEpoch(selectedDate ?: today, quickTime.clockMinutes, zone)
+                    TextButton(
+                        onClick = { onQuickTime(epoch) },
+                        enabled = selectedDate != null && epoch > now.toEpochMilli(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(SnoozeSuggestions.formatClock(epoch, zone))
+                    }
+                }
+            }
+        }
+
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.End,
             modifier = Modifier.fillMaxWidth()
         ) {
             TextButton(
-                onClick = {
-                    selectedDate?.let { date ->
-                        val dateTime = LocalDateTime.of(date, morningTime)
-                        onDateAndTimeSelected(
-                            dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                        )
-                    }
-                },
-                enabled = morningEnabled,
-                modifier = Modifier.weight(1f)
+                onClick = { selectedDate?.let { onDateSelected(it) } },
+                enabled = selectedDate != null
             ) {
-                Text("Morning")
-            }
-
-            TextButton(
-                onClick = {
-                    selectedDate?.let { date ->
-                        val dateTime = LocalDateTime.of(date, eveningTime)
-                        onDateAndTimeSelected(
-                            dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                        )
-                    }
-                },
-                enabled = eveningEnabled,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Evening")
-            }
-
-            TextButton(
-                onClick = {
-                    selectedDate?.let { onDateSelected(it) }
-                },
-                enabled = selectedDate != null,
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Custom")
+                Text("Custom time")
             }
         }
 
@@ -270,8 +266,9 @@ private fun DatePickerSheetContent(
 @Composable
 private fun TimePickerSheet(
     selectedDate: LocalDate,
-    morningMinutes: Int = 480,
-    onSetPreferredTime: (Int) -> Unit = {},
+    quickTimes: List<QuickTime>,
+    now: Instant,
+    zone: ZoneId,
     onDismiss: () -> Unit,
     onConfirm: (epochMillis: Long) -> Unit
 ) {
@@ -284,8 +281,9 @@ private fun TimePickerSheet(
     ) {
         TimePickerSheetContent(
             selectedDate = selectedDate,
-            morningMinutes = morningMinutes,
-            onSetPreferredTime = onSetPreferredTime,
+            quickTimes = quickTimes,
+            now = now,
+            zone = zone,
             onDismiss = onDismiss,
             onConfirm = onConfirm
         )
@@ -296,31 +294,28 @@ private fun TimePickerSheet(
 @Composable
 private fun TimePickerSheetContent(
     selectedDate: LocalDate,
-    morningMinutes: Int = 480,
-    onSetPreferredTime: (Int) -> Unit = {},
+    quickTimes: List<QuickTime>,
+    now: Instant,
+    zone: ZoneId,
     onDismiss: () -> Unit,
     onConfirm: (epochMillis: Long) -> Unit
 ) {
-    val isToday = selectedDate == LocalDate.now()
-    val defaultHour = if (isToday) LocalTime.now().hour else morningMinutes / 60
-    val defaultMinute = if (isToday) LocalTime.now().minute else morningMinutes % 60
-
-    val timePickerState = rememberTimePickerState(
-        initialHour = defaultHour,
-        initialMinute = defaultMinute
-    )
-
-    // Validation: if today, time must be in future
-    val isTimeValid = remember(timePickerState.hour, timePickerState.minute) {
-        if (!isToday) return@remember true
-        val selectedTime = LocalTime.of(timePickerState.hour, timePickerState.minute)
-        selectedTime.isAfter(LocalTime.now())
+    val initialTime = remember(selectedDate) {
+        val best = quickTimes.maxByOrNull { it.weight }
+        if (best != null && SnoozeSuggestions.quickTimeEpoch(selectedDate, best.clockMinutes, zone) > now.toEpochMilli()) {
+            LocalTime.of(best.clockMinutes / 60, best.clockMinutes % 60)
+        } else {
+            SnoozeSuggestions.nextQuarterHour(LocalTime.ofInstant(now, zone))
+        }
     }
+    val timePickerState = rememberTimePickerState(
+        initialHour = initialTime.hour,
+        initialMinute = initialTime.minute,
+        is24Hour = true
+    )
+    val selectedEpoch = LocalDateTime.of(selectedDate, LocalTime.of(timePickerState.hour, timePickerState.minute))
+        .atZone(zone).toInstant().toEpochMilli()
 
-    // Determine which preferred time this would set
-    val selectedTotalMinutes = timePickerState.hour * 60 + timePickerState.minute
-    val isMorning = timePickerState.hour < 12
-    val preferredLabel = if (isMorning) "Morning" else "Evening"
     Column(
         modifier = Modifier.padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -331,20 +326,11 @@ private fun TimePickerSheetContent(
         TimePicker(state = timePickerState)
 
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { onSetPreferredTime(selectedTotalMinutes) }) {
-                Text("Set as $preferredLabel")
-            }
             Spacer(Modifier.weight(1f))
             TextButton(onClick = onDismiss) { Text("Cancel") }
             TextButton(
-                onClick = {
-                    val dateTime = LocalDateTime.of(
-                        selectedDate,
-                        LocalTime.of(timePickerState.hour, timePickerState.minute)
-                    )
-                    onConfirm(dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
-                },
-                enabled = isTimeValid
+                onClick = { onConfirm(selectedEpoch) },
+                enabled = selectedEpoch > now.toEpochMilli()
             ) { Text("Confirm") }
         }
 
@@ -353,150 +339,88 @@ private fun TimePickerSheetContent(
 }
 
 @Composable
-private fun SnoozeOptionItem(
-    option: SnoozeOption,
+private fun MenuRowItem(
+    row: MenuRow,
+    now: Instant,
+    zone: ZoneId,
     onClick: () -> Unit
 ) {
-    val context = LocalContext.current
-    val formattedTime = remember(option.epochMillis) {
-        if (option.epochMillis > 0) {
-            LocalDateTimeUtil.formatSnoozeTime(option.epochMillis, context)
-        } else null
+    val label = when (row) {
+        is MenuRow.Suggestion -> row.row.label
+        is MenuRow.Last -> SnoozeSuggestions.lastLabel(row.epochMillis, zone)
+        is MenuRow.Custom -> "Custom"
     }
-
     ListItem(
-        headlineContent = { Text(option.label) },
+        headlineContent = { Text(label) },
         leadingContent = {
             Icon(
-                imageVector = option.icon,
+                imageVector = row.icon(now, zone),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        },
-        trailingContent = formattedTime?.let {
-            {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         },
         modifier = Modifier.clickable(onClick = onClick)
     )
 }
 
-private val SnoozeOption.icon: ImageVector
-    get() = when (this) {
-        is SnoozeOption.InALittleWhile -> Icons.Default.Schedule
-        is SnoozeOption.ThisMorning -> Icons.Default.LightMode
-        is SnoozeOption.LaterToday -> Icons.Default.Nightlight
-        is SnoozeOption.Tomorrow -> Icons.Default.Today
-        is SnoozeOption.LaterTomorrow -> Icons.Default.Nightlight
-        is SnoozeOption.ThisWeekend -> Icons.Default.Weekend
-        is SnoozeOption.ThisSunday -> Icons.Default.Weekend
-        is SnoozeOption.ThisMonday -> Icons.AutoMirrored.Filled.NextWeek
-        is SnoozeOption.ThisTuesday -> Icons.Default.Today
-        is SnoozeOption.NextWeekend -> Icons.Default.Weekend
-        is SnoozeOption.NextWeek -> Icons.AutoMirrored.Filled.NextWeek
-        is SnoozeOption.Last -> Icons.Default.History
-        is SnoozeOption.Custom -> Icons.Default.CalendarMonth
+private fun MenuRow.icon(now: Instant, zone: ZoneId): ImageVector = when (this) {
+    is MenuRow.Suggestion -> when (SnoozeSuggestions.rowIcon(row.key, row.epochMillis, now, zone)) {
+        RowIcon.OFFSET -> Icons.Default.Schedule
+        RowIcon.TODAY_DAY -> Icons.Default.LightMode
+        RowIcon.TODAY_NIGHT -> Icons.Default.Nightlight
+        RowIcon.TOMORROW -> Icons.Default.Today
+        RowIcon.DAYS -> Icons.Default.DateRange
+        RowIcon.WEEKDAY -> Icons.AutoMirrored.Filled.NextWeek
+        RowIcon.MONTHLY -> Icons.Default.Event
     }
+    is MenuRow.Last -> Icons.Default.History
+    is MenuRow.Custom -> Icons.Default.CalendarMonth
+}
 
-@Preview(showBackground = true, name = "Morning - 6am weekday")
+@Preview(showBackground = true, name = "Empty - no history yet")
 @Composable
-private fun SnoozeBottomSheetPreview_Morning() {
-    val morningWeekday = LocalDateTime.of(2024, 1, 15, 6, 0) // Monday 6am
-        .atZone(ZoneId.systemDefault())
-        .toInstant()
-
+private fun SnoozeBottomSheetPreview_Empty() {
+    val now = LocalDateTime.of(2024, 1, 15, 6, 0)
+        .atZone(ZoneId.systemDefault()).toInstant()
     LatrTheme {
-        SnoozeOptionsPreviewContent(
-            now = morningWeekday,
-            lastCustomSnoozeTime = null
-        )
+        SnoozeOptionsPreviewContent(now = now, partitions = emptyList())
     }
 }
 
-@Preview(showBackground = true, name = "Afternoon - 2pm weekday")
+@Preview(showBackground = true, name = "With a learned daily habit")
 @Composable
-private fun SnoozeBottomSheetPreview_Afternoon() {
-    val afternoonWeekday = LocalDateTime.of(2024, 1, 15, 14, 0) // Monday 2pm
-        .atZone(ZoneId.systemDefault())
-        .toInstant()
-
-    LatrTheme {
-        SnoozeOptionsPreviewContent(
-            now = afternoonWeekday,
-            lastCustomSnoozeTime = null
-        )
+private fun SnoozeBottomSheetPreview_LearnedHabit() {
+    val zone = ZoneId.systemDefault()
+    var stats = io.hafa.latr.util.SnoozeStatsSnapshot()
+    var day = LocalDateTime.of(2024, 1, 1, 10, 0)
+    repeat(20) {
+        val at = day.atZone(zone).toInstant()
+        val target = day.plusDays(1).withHour(8).withMinute(0).atZone(zone).toInstant()
+        val result = SnoozeSuggestions.commit(stats, at.toEpochMilli(), target.toEpochMilli(), zone, source = "suggestion")
+        stats = result.next
+        day = day.plusDays(1)
     }
-}
-
-@Preview(showBackground = true, name = "Evening - 9pm weekday")
-@Composable
-private fun SnoozeBottomSheetPreview_Evening() {
-    val eveningWeekday = LocalDateTime.of(2024, 1, 15, 21, 0) // Monday 9pm
-        .atZone(ZoneId.systemDefault())
-        .toInstant()
-
+    val now = day.atZone(zone).toInstant()
     LatrTheme {
-        SnoozeOptionsPreviewContent(
-            now = eveningWeekday,
-            lastCustomSnoozeTime = null
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Weekend - Saturday")
-@Composable
-private fun SnoozeBottomSheetPreview_Weekend() {
-    val saturday = LocalDateTime.of(2024, 1, 20, 10, 0) // Saturday 10am
-        .atZone(ZoneId.systemDefault())
-        .toInstant()
-
-    LatrTheme {
-        SnoozeOptionsPreviewContent(
-            now = saturday,
-            lastCustomSnoozeTime = null
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "With Last option")
-@Composable
-private fun SnoozeBottomSheetPreview_WithLast() {
-    val afternoonWeekday = LocalDateTime.of(2024, 1, 15, 14, 0) // Monday 2pm
-        .atZone(ZoneId.systemDefault())
-        .toInstant()
-
-    val lastCustomTime = LocalDateTime.of(2024, 1, 18, 9, 30).toString() // Thursday 9:30am
-
-    LatrTheme {
-        SnoozeOptionsPreviewContent(
-            now = afternoonWeekday,
-            lastCustomSnoozeTime = lastCustomTime
-        )
+        SnoozeOptionsPreviewContent(now = now, partitions = listOf(stats))
     }
 }
 
 @Composable
 private fun SnoozeOptionsPreviewContent(
     now: Instant,
-    lastCustomSnoozeTime: String?
+    partitions: List<SnoozeStatsSnapshot>,
 ) {
-    val options = SnoozeTimeCalculator.getSnoozeOptions(now, lastCustomSnoozeTime)
+    val zone = ZoneId.systemDefault()
+    val rows = buildMenuRows(partitions, now, zone)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 16.dp)
     ) {
-        options.forEach { option ->
-            SnoozeOptionItem(
-                option = option,
-                onClick = {}
-            )
+        rows.forEach { row ->
+            MenuRowItem(row = row, now = now, zone = zone, onClick = {})
         }
     }
 }
@@ -505,12 +429,15 @@ private fun SnoozeOptionsPreviewContent(
 @Preview(showBackground = true, name = "Date Picker Sheet")
 @Composable
 private fun DatePickerSheetPreview() {
+    val zone = ZoneId.systemDefault()
+    val now = Instant.now()
     LatrTheme {
         DatePickerSheetContent(
+            quickTimes = listOf(QuickTime(9 * 60, 3.0), QuickTime(21 * 60 + 30, 1.0)),
+            now = now,
+            zone = zone,
             onDateSelected = {},
-            morningMinutes = 480,
-            eveningMinutes = 1200,
-            onDateAndTimeSelected = {}
+            onQuickTime = {}
         )
     }
 }
@@ -522,6 +449,9 @@ private fun TimePickerSheetPreview() {
     LatrTheme {
         TimePickerSheetContent(
             selectedDate = LocalDate.now().plusDays(1),
+            quickTimes = emptyList(),
+            now = Instant.now(),
+            zone = ZoneId.systemDefault(),
             onDismiss = {},
             onConfirm = {}
         )

@@ -2,6 +2,7 @@ package io.hafa.latr
 
 import android.app.Application
 import android.util.Log
+import io.hafa.latr.data.SnoozeStatsStore
 import io.hafa.latr.data.TodoDatabase
 import io.hafa.latr.data.TodoStoreHolder
 import io.hafa.latr.data.UserPreferences
@@ -14,6 +15,7 @@ class LatrApplication : Application() {
 
     val database: TodoDatabase by lazy { TodoDatabase.getDatabase(this) }
     val todoDao by lazy { database.todoDao() }
+    val snoozeStatsDao by lazy { database.snoozeStatsDao() }
     val userPreferences by lazy { UserPreferences(this) }
 
     val authManager: AuthManager? by lazy {
@@ -29,11 +31,15 @@ class LatrApplication : Application() {
         TodoStoreHolder(todoDao, authManager, applicationScope)
     }
 
+    val snoozeStatsStore: SnoozeStatsStore by lazy {
+        SnoozeStatsStore(snoozeStatsDao, userPreferences, authManager, applicationScope)
+    }
+
     override fun onCreate() {
         super.onCreate()
-        // Force-initialize the holder so it subscribes to auth-state changes
-        // from app launch, not only when the UI first observes it.
+        // Subscribe to auth changes from launch, not only once the UI first reads these.
         storeHolder
+        snoozeStatsStore
     }
 
     private fun getFirebaseWebClientId(): String? = try {

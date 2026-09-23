@@ -31,10 +31,15 @@ class Converters {
     }
 }
 
-@Database(entities = [Todo::class], version = 9, exportSchema = false)
+@Database(
+    entities = [Todo::class, SnoozeSetEntity::class, SnoozeTodEntity::class],
+    version = 11,
+    exportSchema = false,
+)
 @TypeConverters(Converters::class)
 abstract class TodoDatabase : RoomDatabase() {
     abstract fun todoDao(): TodoDao
+    abstract fun snoozeStatsDao(): SnoozeStatsDao
 
     companion object {
         @Volatile
@@ -46,6 +51,28 @@ abstract class TodoDatabase : RoomDatabase() {
             }
         }
 
+        private const val CREATE_SNOOZE_SETS =
+            "CREATE TABLE IF NOT EXISTS snooze_sets (id TEXT NOT NULL PRIMARY KEY, c REAL NOT NULL, t INTEGER NOT NULL)"
+        private const val CREATE_SNOOZE_TOD =
+            "CREATE TABLE IF NOT EXISTS snooze_tod (slot TEXT NOT NULL PRIMARY KEY, c REAL NOT NULL, t INTEGER NOT NULL)"
+
+        private val MIGRATION_9_11 = object : Migration(9, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(CREATE_SNOOZE_SETS)
+                db.execSQL(CREATE_SNOOZE_TOD)
+            }
+        }
+
+        // v10 was a pre-release build keyed by time-of-day bucket; its sets can't be converted.
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS snooze_patterns")
+                db.execSQL(CREATE_SNOOZE_SETS)
+                db.execSQL("DELETE FROM snooze_sets")
+                db.execSQL(CREATE_SNOOZE_TOD)
+            }
+        }
+
         // v9: serverModifiedAt → nullable (Timestamp via Converter); destructive.
         fun getDatabase(context: Context): TodoDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -54,7 +81,7 @@ abstract class TodoDatabase : RoomDatabase() {
                     TodoDatabase::class.java,
                     "todo_database"
                 )
-                    .addMigrations(MIGRATION_7_8)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance
