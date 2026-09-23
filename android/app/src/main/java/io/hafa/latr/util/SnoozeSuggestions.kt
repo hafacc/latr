@@ -70,6 +70,10 @@ object SnoozeSuggestions {
         return LocalTime.of((next / 60) % 24, next % 60)
     }
 
+    /** Today, unless the next quarter hour wraps past midnight, so the picker opens on a time that's still ahead. */
+    fun defaultCustomDate(now: LocalDateTime): LocalDate =
+        if (nextQuarterHour(now.toLocalTime()) <= now.toLocalTime()) now.toLocalDate().plusDays(1) else now.toLocalDate()
+
     fun isValidSetId(id: String): Boolean = id.split("__").all { KEY_RE.matches(it) }
 
     private val D_RE = Regex("^D([0-6])$")
@@ -529,32 +533,44 @@ object SnoozeSuggestions {
         else -> "Tonight"
     }
 
-    /** Labels name the target's day from the resolved instant; the region word comes from the resolved time. */
-    fun labelFor(key: PatternKey, resolvedEpoch: Long, now: Instant, zone: ZoneId): String {
+    private data class LabelParts(val text: String, val parenthesizedTime: Boolean)
+
+    private fun labelParts(key: PatternKey, resolvedEpoch: Long, now: Instant, zone: ZoneId): LabelParts {
         val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(resolvedEpoch), zone)
-        val timeStr = formatClockTime(dt)
         val region = bucketOf(minutesSince0500(dt))
         val phrase = phraseFor(key, resolvedEpoch, now, zone)
 
         if (!isTimedKey(key)) {
             when (offsetPhraseKind(key)) {
-                "littleWhile" -> return "In a little while ($timeStr)"
-                "muchLater" -> return "Much later ($timeStr)"
+                "littleWhile" -> return LabelParts("In a little while", true)
+                "muchLater" -> return LabelParts("Much later", true)
             }
             // A non-D0 offset seen between 00:00 and 05:00 can land on the calendar "today".
             val dayText = if (phrase.kind == "today") "Today" else phrase.text
             val h = key.substringAfter("_h").toInt()
-            return if (h == 0) "$dayText, same time ($timeStr)" else "$dayText, $timeStr"
+            return if (h == 0) LabelParts("$dayText, same time", true) else LabelParts(dayText, false)
         }
-        if (phrase.kind == "today") return "${todayPhrase(region)}, $timeStr"
-        return if (phrase.adjectival) "${phrase.text} $region, $timeStr" else "${phrase.text}, $timeStr"
+        if (phrase.kind == "today") return LabelParts(todayPhrase(region), false)
+        return LabelParts(if (phrase.adjectival) "${phrase.text} $region" else phrase.text, false)
     }
 
-    fun lastLabel(target: Long, zone: ZoneId): String {
+    /** Labels name the target's day from the resolved instant; the region word comes from the resolved time. */
+    fun labelFor(key: PatternKey, resolvedEpoch: Long, now: Instant, zone: ZoneId): String {
+        val parts = labelParts(key, resolvedEpoch, now, zone)
+        val timeStr = formatClock(resolvedEpoch, zone)
+        return if (parts.parenthesizedTime) "${parts.text} ($timeStr)" else "${parts.text}, $timeStr"
+    }
+
+    /** [labelFor] without the clock time, for layouts that show the time in its own column. */
+    fun labelText(key: PatternKey, resolvedEpoch: Long, now: Instant, zone: ZoneId): String =
+        labelParts(key, resolvedEpoch, now, zone).text
+
+    fun lastText(target: Long, zone: ZoneId): String {
         val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(target), zone)
         val month = dt.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        return "Last · $month ${dt.dayOfMonth}, ${formatClockTime(dt)}"
+        return "Last · $month ${dt.dayOfMonth}"
     }
+
 
     fun formatClock(epochMillis: Long, zone: ZoneId): String =
         formatClockTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), zone))

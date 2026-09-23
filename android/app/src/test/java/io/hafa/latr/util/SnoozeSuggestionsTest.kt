@@ -355,9 +355,10 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `last label is 24-hour`() {
+    fun `last text is the date and its clock time is 24-hour`() {
         val target = epoch(LocalDateTime.of(2026, 9, 24, 21, 5))
-        assertEquals("Last · Sep 24, 21:05", SnoozeSuggestions.lastLabel(target, zone))
+        assertEquals("Last · Sep 24", SnoozeSuggestions.lastText(target, zone))
+        assertEquals("21:05", SnoozeSuggestions.formatClock(target, zone))
     }
 
     @Test
@@ -445,8 +446,34 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
+    fun `custom date moves to tomorrow once the next quarter hour wraps midnight`() {
+        assertEquals(LocalDate.of(2026, 9, 21), SnoozeSuggestions.defaultCustomDate(LocalDateTime.of(2026, 9, 21, 23, 44)))
+        assertEquals(LocalDate.of(2026, 9, 22), SnoozeSuggestions.defaultCustomDate(LocalDateTime.of(2026, 9, 21, 23, 45)))
+    }
+
+    @Test
     fun `set ids with any old-format member are invalid`() {
         assertTrue(SnoozeSuggestions.isValidSetId("D1@0900__Wd4@0900"))
         assertFalse(SnoozeSuggestions.isValidSetId("D1@0900__D1_morning"))
+    }
+
+    @Test
+    fun `label text is the label without its clock time`() {
+        val noon = LocalDateTime.of(2026, 9, 21, 12, 0)
+        val cases = listOf(
+            "D0_h3" to LocalDateTime.of(2026, 9, 21, 15, 0),
+            "D0@2000" to LocalDateTime.of(2026, 9, 21, 20, 0),
+            "D1@0900" to LocalDateTime.of(2026, 9, 22, 9, 0),
+            "D1_h0" to LocalDateTime.of(2026, 9, 22, 12, 0),
+            "Wd4@0900" to LocalDateTime.of(2026, 9, 24, 9, 0),
+        )
+        for ((key, resolved) in cases) {
+            val text = SnoozeSuggestions.labelText(key, epoch(resolved), instant(noon), zone)
+            val time = SnoozeSuggestions.formatClock(epoch(resolved), zone)
+            val full = label(key, resolved, noon)
+            assertTrue("$key: $full vs $text", full == "$text, $time" || full == "$text ($time)")
+        }
+        assertEquals("In a little while", SnoozeSuggestions.labelText("D0_h3", epoch(cases[0].second), instant(noon), zone))
+        assertEquals("Tomorrow morning", SnoozeSuggestions.labelText("D1@0900", epoch(cases[2].second), instant(noon), zone))
     }
 }
