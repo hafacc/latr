@@ -1,5 +1,4 @@
-// Published under github.com/hafaio/latr via GitHub Pages → hafaio.github.io/latr
-// Change basePath/assetPrefix if the repo is renamed or a custom domain is used.
+// Served by GitHub Pages for github.com/hafacc/latr at hafa.cc/latr; the deploy workflow sets the base path.
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export default {
