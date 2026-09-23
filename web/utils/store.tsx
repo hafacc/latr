@@ -268,6 +268,7 @@ export function TodoProvider({ children }: { children: ReactNode }) {
         snoozeUntil: null,
         modifiedAt: Date.now(),
       });
+      dispatch({ type: "setFocus", id: null });
       dispatch({
         type: "setUndo",
         entry: { kind: "complete", todos: [existing] },
