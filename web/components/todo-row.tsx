@@ -55,8 +55,10 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
     markDone,
     reactivate,
     snooze,
-    recordCustomSnooze,
-    lastCustomSnooze,
+    snoozeRows,
+    snoozeLastRow,
+    snoozeQuickTimes,
+    refreshNow,
     togglePinned,
     remove,
     removeUndoable,
@@ -273,12 +275,16 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
             </button>
             {snoozeOpen && (
               <SnoozeMenu
-                onPick={(epoch) => {
-                  snooze(todo.id, epoch);
-                  setSnoozeOpen(false);
+                rows={snoozeRows}
+                lastRow={snoozeLastRow}
+                quickTimes={snoozeQuickTimes}
+                now={now}
+                refreshNow={refreshNow}
+                onPick={(epoch, source, pickedKey) => {
+                  if (snooze(todo.id, epoch, source, pickedKey)) {
+                    setSnoozeOpen(false);
+                  }
                 }}
-                onCustomPick={recordCustomSnooze}
-                lastCustomMillis={lastCustomSnooze}
                 onClose={() => setSnoozeOpen(false)}
               />
             )}

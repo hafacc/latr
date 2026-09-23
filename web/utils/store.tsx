@@ -12,6 +12,18 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type {
+  CommitUndoSnapshot,
+  DevicePartition,
+  QuickTime,
+  Row,
+  SnoozeSource,
+} from "./snooze-suggest";
+import {
+  lastRow as computeLastRow,
+  quickTimes as computeQuickTimes,
+  rank as rankSnoozeRows,
+} from "./snooze-suggest";
 import { TodoStoreHolder } from "./store-holder";
 import {
   epochToIso,
@@ -25,7 +37,12 @@ import {
 
 // Most-recent-wins undo: "delete" restores via re-insert, "snooze"/"complete" via update.
 export type UndoKind = "delete" | "snooze" | "complete";
-export type UndoEntry = { kind: UndoKind; todos: Todo[] };
+export type UndoEntry = {
+  kind: UndoKind;
+  todos: Todo[];
+  // Only set for "snooze": the learned-suggestion credit this pick added, so undo can retract it.
+  snoozeUndo?: CommitUndoSnapshot;
+};
 
 export type UiState = {
   filter: Filter;
@@ -33,9 +50,6 @@ export type UiState = {
   focusId: string | null;
   lastUndo: UndoEntry | null;
   undoExpiresAt: number | null;
-  // Epoch of the most recent custom snooze pick this session; surfaces the
-  // "Last" quick option. Session-only (resets on reload), like Android.
-  lastCustomSnooze: number | null;
 };
 
 export type UiAction =
@@ -43,8 +57,7 @@ export type UiAction =
   | { type: "setSearch"; search: string }
   | { type: "setFocus"; id: string | null }
   | { type: "setUndo"; entry: UndoEntry }
-  | { type: "clearUndo" }
-  | { type: "setLastCustomSnooze"; epoch: number };
+  | { type: "clearUndo" };
 
 export const initialUi: UiState = {
   filter: "ACTIVE",
@@ -52,7 +65,6 @@ export const initialUi: UiState = {
   focusId: null,
   lastUndo: null,
   undoExpiresAt: null,
-  lastCustomSnooze: null,
 };
 
 export function uiReducer(state: UiState, action: UiAction): UiState {
@@ -81,8 +93,6 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
     case "clearUndo":
       if (state.lastUndo === null && state.undoExpiresAt === null) return state;
       return { ...state, lastUndo: null, undoExpiresAt: null };
-    case "setLastCustomSnooze":
-      return { ...state, lastCustomSnooze: action.epoch };
   }
 }
 
@@ -92,12 +102,21 @@ type ContextShape = UiState & {
   syncing: boolean;
   now: number;
   holder: TodoStoreHolder;
+  snoozeRows: Row[];
+  snoozeLastRow: { time: number; label: string } | null;
+  snoozeQuickTimes: QuickTime[];
+  refreshNow: () => void;
   create: (text?: string) => Todo;
   edit: (id: string, text: string) => void;
   markDone: (id: string) => void;
   reactivate: (id: string) => void;
-  snooze: (id: string, epoch: number) => void;
-  recordCustomSnooze: (epoch: number) => void;
+  // False (and nothing written) when `epoch` is no longer in the future.
+  snooze: (
+    id: string,
+    epoch: number,
+    source: SnoozeSource,
+    pickedKey?: string,
+  ) => boolean;
   togglePinned: (id: string) => void;
   remove: (id: string) => void;
   removeUndoable: (id: string) => void;
@@ -110,8 +129,10 @@ type ContextShape = UiState & {
 };
 
 const Ctx = createContext<ContextShape | null>(null);
+const MAX_NOW_STALENESS_MS = 5 * 60 * 1000;
 
 const EMPTY_TODOS: Todo[] = [];
+const EMPTY_PARTITIONS: DevicePartition[] = [];
 
 export function TodoProvider({ children }: { children: ReactNode }) {
   const holderRef = useRef<TodoStoreHolder | null>(null);
@@ -143,6 +164,34 @@ export function TodoProvider({ children }: { children: ReactNode }) {
   const getSyncingServer = useCallback(() => false, []);
   const syncing = useSyncExternalStore(subscribe, getSyncing, getSyncingServer);
 
+  const subscribeStats = useCallback(
+    (cb: () => void) => holder.snoozeStats.subscribe(cb),
+    [holder],
+  );
+  const getStatsSnapshot = useCallback(
+    () => holder.snoozeStats.getPartitions(),
+    [holder],
+  );
+  const getStatsServerSnapshot = useCallback(() => EMPTY_PARTITIONS, []);
+  const snoozePartitions = useSyncExternalStore(
+    subscribeStats,
+    getStatsSnapshot,
+    getStatsServerSnapshot,
+  );
+  const snoozeRows = useMemo(
+    () => rankSnoozeRows(snoozePartitions, now),
+    [snoozePartitions, now],
+  );
+  const snoozeLastRow = useMemo(
+    () => computeLastRow(snoozePartitions, now, snoozeRows),
+    [snoozePartitions, now, snoozeRows],
+  );
+  const snoozeQuickTimes = useMemo(
+    () => computeQuickTimes(snoozePartitions, now),
+    [snoozePartitions, now],
+  );
+  const refreshNow = useCallback(() => setNow(Date.now()), []);
+
   // Auto-expire the undo window.
   useEffect(() => {
     if (!ui.undoExpiresAt) return;
@@ -163,10 +212,10 @@ export function TodoProvider({ children }: { children: ReactNode }) {
       const at = isoToEpoch(t.snoozeUntil);
       if (at > now && at < nextExpiry) nextExpiry = at;
     }
-    if (nextExpiry === Number.POSITIVE_INFINITY) return;
+    const wakeAt = Math.min(nextExpiry, Date.now() + MAX_NOW_STALENESS_MS);
     const id = setTimeout(
       () => setNow(Date.now()),
-      Math.max(100, nextExpiry - Date.now()),
+      Math.max(100, wakeAt - Date.now()),
     );
     return () => clearTimeout(id);
   }, [todos, now]);
@@ -241,27 +290,40 @@ export function TodoProvider({ children }: { children: ReactNode }) {
   );
 
   const snooze = useCallback(
-    (id: string, epoch: number) => {
+    (
+      id: string,
+      epoch: number,
+      source: SnoozeSource,
+      pickedKey?: string,
+    ): boolean => {
       const store = holder.getStore();
       const existing = store.getTodos().find((t) => t.id === id);
-      if (!existing) return;
+      if (!existing) return false;
+      // Rows are computed against a `now` that can lag; refresh it so the stale row re-resolves.
+      if (epoch <= Date.now()) {
+        setNow(Date.now());
+        return false;
+      }
       void store.update({
         ...existing,
         snoozeUntil: epochToIso(epoch),
         modifiedAt: Date.now(),
       });
+      const snoozeUndo = holder.snoozeStats.commit(
+        Date.now(),
+        epoch,
+        source,
+        pickedKey ?? null,
+      );
       // Buffer the pre-snooze snapshot so undo restores its prior sort position.
       dispatch({
         type: "setUndo",
-        entry: { kind: "snooze", todos: [existing] },
+        entry: { kind: "snooze", todos: [existing], snoozeUndo },
       });
+      return true;
     },
     [holder],
   );
-
-  const recordCustomSnooze = useCallback((epoch: number) => {
-    dispatch({ type: "setLastCustomSnooze", epoch });
-  }, []);
 
   const togglePinned = useCallback(
     (id: string) => {
@@ -320,6 +382,9 @@ export function TodoProvider({ children }: { children: ReactNode }) {
     } else {
       // Rows still exist (unlike delete), so re-apply the prior snapshot via update.
       for (const prior of entry.todos) void store.update(prior);
+      if (entry.kind === "snooze" && entry.snoozeUndo) {
+        holder.snoozeStats.undo(entry.snoozeUndo);
+      }
     }
     dispatch({ type: "clearUndo" });
   }, [holder, ui.lastUndo]);
@@ -346,12 +411,15 @@ export function TodoProvider({ children }: { children: ReactNode }) {
       syncing,
       now,
       holder,
+      snoozeRows,
+      snoozeLastRow,
+      snoozeQuickTimes,
+      refreshNow,
       create,
       edit,
       markDone,
       reactivate,
       snooze,
-      recordCustomSnooze,
       togglePinned,
       remove,
       removeUndoable,
@@ -369,12 +437,15 @@ export function TodoProvider({ children }: { children: ReactNode }) {
       syncing,
       now,
       holder,
+      snoozeRows,
+      snoozeLastRow,
+      snoozeQuickTimes,
+      refreshNow,
       create,
       edit,
       markDone,
       reactivate,
       snooze,
-      recordCustomSnooze,
       togglePinned,
       remove,
       removeUndoable,

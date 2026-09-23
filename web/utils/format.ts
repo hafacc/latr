@@ -1,6 +1,7 @@
 const timeFmt = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
+  hour: "2-digit",
   minute: "2-digit",
+  hourCycle: "h23",
 });
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {

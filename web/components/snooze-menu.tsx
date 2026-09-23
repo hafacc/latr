@@ -1,15 +1,15 @@
 "use client";
 
 import { type ReactElement, useEffect, useRef, useState } from "react";
-import { formatSnoozeTime } from "../utils/format";
-import { getSnoozeOptions } from "../utils/snooze";
+import {
+  formatClock,
+  type QuickTime,
+  quickTimeEpoch,
+  type Row,
+  type SnoozeSource,
+} from "../utils/snooze-suggest";
 
-// Matches the defaults in `getSnoozeOptions`. When a preferences surface
-// lands on web these should source from there.
-const DEFAULT_MORNING_MINUTES = 480;
-const DEFAULT_EVENING_MINUTES = 1200;
-
-type CustomMode = "morning" | "evening" | "custom";
+const MENU_CLOCK_TICK_MS = 30_000;
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -32,26 +32,66 @@ function parseTime(hhmm: string): number | null {
   return h * 60 + m;
 }
 
+function clockLabel(clockMinutes: number): string {
+  return formatClock(
+    new Date(
+      2000,
+      0,
+      1,
+      Math.floor(clockMinutes / 60),
+      clockMinutes % 60,
+    ).getTime(),
+  );
+}
+
+/** The strongest quick time if it's still ahead on `dateYmd`, else the next quarter hour after now. */
+function defaultTime(dateYmd: string, quickTimes: QuickTime[]): string {
+  let best: QuickTime | null = null;
+  for (const q of quickTimes) if (!best || q.weight > best.weight) best = q;
+  if (best) {
+    const epoch = quickTimeEpoch(dateYmd, best.clockMinutes);
+    if (epoch !== null && epoch > Date.now()) {
+      return formatTime(best.clockMinutes);
+    }
+  }
+  const current = new Date();
+  const minutes = current.getHours() * 60 + current.getMinutes();
+  return formatTime((Math.floor(minutes / 15) * 15 + 15) % 1440);
+}
+
 export default function SnoozeMenu({
+  rows,
+  lastRow,
+  quickTimes,
+  now,
+  refreshNow,
   onPick,
-  onCustomPick,
-  lastCustomMillis,
   onClose,
 }: {
-  onPick: (epochMillis: number) => void;
-  onCustomPick: (epochMillis: number) => void;
-  lastCustomMillis: number | null;
+  rows: Row[];
+  lastRow: Pick<Row, "time" | "label"> | null;
+  quickTimes: QuickTime[];
+  now: number;
+  refreshNow: () => void;
+  onPick: (
+    epochMillis: number,
+    source: SnoozeSource,
+    pickedKey?: string,
+  ) => void;
   onClose: () => void;
 }): ReactElement {
   const rootRef = useRef<HTMLDivElement>(null);
   const [customOpen, setCustomOpen] = useState(false);
-  const [customDate, setCustomDate] = useState(() =>
-    formatDate(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-  );
-  const [customMode, setCustomMode] = useState<CustomMode>("morning");
+  const [customDate, setCustomDate] = useState(() => formatDate(new Date()));
   const [customTime, setCustomTime] = useState(() =>
-    formatTime(DEFAULT_MORNING_MINUTES),
+    defaultTime(customDate, quickTimes),
   );
+
+  useEffect(() => {
+    refreshNow();
+    const id = setInterval(refreshNow, MENU_CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, [refreshNow]);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -69,22 +109,14 @@ export default function SnoozeMenu({
     };
   }, [onClose]);
 
-  const options = getSnoozeOptions(new Date(), { lastCustomMillis });
-
   function pickedEpoch(): number | null {
     const d = new Date(`${customDate}T00:00:00`);
     if (Number.isNaN(d.getTime())) return null;
-    let minutes: number;
-    if (customMode === "morning") minutes = DEFAULT_MORNING_MINUTES;
-    else if (customMode === "evening") minutes = DEFAULT_EVENING_MINUTES;
-    else {
-      const parsed = parseTime(customTime);
-      if (parsed === null) return null;
-      minutes = parsed;
-    }
+    const minutes = parseTime(customTime);
+    if (minutes === null) return null;
     d.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
     const epoch = d.getTime();
-    if (epoch <= Date.now()) return null;
+    if (epoch <= now) return null;
     return epoch;
   }
 
@@ -94,118 +126,114 @@ export default function SnoozeMenu({
   return (
     <div
       ref={rootRef}
-      className="absolute z-30 right-0 mt-2 w-64 rounded-xl bg-surface border border-border shadow-xl overflow-hidden p-1"
+      className="absolute z-30 right-0 mt-2 w-max min-w-64 max-w-[calc(100vw-2rem)] rounded-xl bg-surface border border-border shadow-xl overflow-hidden p-1"
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       role="menu"
     >
-      {options.map((opt) => {
-        if (opt.kind === "Custom") {
-          return (
-            <div key="custom" className="mt-1 pt-1 border-t border-border">
-              {customOpen ? (
-                <div className="p-2 space-y-2">
-                  <input
-                    type="date"
-                    value={customDate}
-                    min={minDate}
-                    onChange={(e) => setCustomDate(e.target.value)}
-                    className="w-full text-sm bg-surface-muted rounded-lg px-3 py-2 text-text outline-none"
-                  />
-                  <div className="flex gap-1">
-                    <CustomModeButton
-                      label="Morning"
-                      active={customMode === "morning"}
-                      onClick={() => setCustomMode("morning")}
-                    />
-                    <CustomModeButton
-                      label="Evening"
-                      active={customMode === "evening"}
-                      onClick={() => setCustomMode("evening")}
-                    />
-                    <CustomModeButton
-                      label="Time"
-                      active={customMode === "custom"}
-                      onClick={() => setCustomMode("custom")}
-                    />
-                  </div>
-                  {customMode === "custom" && (
-                    <input
-                      type="time"
-                      value={customTime}
-                      onChange={(e) => setCustomTime(e.target.value)}
-                      className="w-full text-sm bg-surface-muted rounded-lg px-3 py-2 text-text outline-none"
-                    />
-                  )}
-                  <div className="flex justify-end gap-1">
-                    <button
-                      type="button"
-                      className="text-xs px-3 py-1.5 rounded-md text-muted hover:bg-surface-hover transition-colors"
-                      onClick={() => setCustomOpen(false)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs px-3 py-1.5 rounded-md bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
-                      disabled={customEpoch === null}
-                      onClick={() => {
-                        if (customEpoch === null) return;
-                        onCustomPick(customEpoch);
-                        onPick(customEpoch);
-                      }}
-                    >
-                      Snooze
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setCustomOpen(true)}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm text-text hover:bg-surface-hover transition-colors"
-                >
-                  Pick a date &amp; time…
-                </button>
-              )}
-            </div>
-          );
+      {rows.map((row) => (
+        <button
+          key={`${row.label}-${row.time}`}
+          type="button"
+          onClick={() => onPick(row.time, "suggestion", row.keyId)}
+          className="w-full flex items-center px-3 py-2 rounded-lg text-sm text-left text-text hover:bg-surface-hover transition-colors"
+        >
+          <span className="whitespace-normal text-left">{row.label}</span>
+        </button>
+      ))}
+      {lastRow && (
+        <button
+          type="button"
+          onClick={() => onPick(lastRow.time, "last")}
+          className="w-full flex items-center px-3 py-2 rounded-lg text-sm text-left text-text hover:bg-surface-hover transition-colors"
+        >
+          <span className="whitespace-normal text-left">{lastRow.label}</span>
+        </button>
+      )}
+      <div
+        className={
+          rows.length > 0 || lastRow ? "mt-1 pt-1 border-t border-border" : ""
         }
-        return (
+      >
+        {customOpen ? (
+          <div className="p-2 space-y-2">
+            <input
+              type="date"
+              value={customDate}
+              min={minDate}
+              onChange={(e) => setCustomDate(e.target.value)}
+              className="w-full h-8 text-sm bg-surface-muted rounded-lg px-3 text-text outline-none"
+            />
+            {quickTimes.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {quickTimes.map((q) => {
+                  const epoch = quickTimeEpoch(customDate, q.clockMinutes);
+                  return (
+                    <QuickTimeButton
+                      key={q.clockMinutes}
+                      label={clockLabel(q.clockMinutes)}
+                      disabled={epoch === null || epoch <= now}
+                      onClick={() => {
+                        if (epoch === null || epoch <= Date.now()) {
+                          refreshNow();
+                          return;
+                        }
+                        onPick(epoch, "custom");
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex gap-1">
+              <input
+                type="time"
+                value={customTime}
+                onChange={(e) => setCustomTime(e.target.value)}
+                className="flex-1 min-w-0 h-8 text-sm bg-surface-muted rounded-lg px-3 text-text outline-none"
+              />
+              <button
+                type="button"
+                className="h-8 text-xs px-3 rounded-lg bg-accent text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
+                disabled={customEpoch === null}
+                onClick={() => {
+                  if (customEpoch === null) return;
+                  onPick(customEpoch, "custom");
+                }}
+              >
+                Snooze
+              </button>
+            </div>
+          </div>
+        ) : (
           <button
-            key={opt.kind}
             type="button"
-            onClick={() => onPick(opt.epochMillis)}
-            className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-sm text-text hover:bg-surface-hover transition-colors"
+            onClick={() => setCustomOpen(true)}
+            className="w-full text-left px-3 py-2 rounded-lg text-sm text-text hover:bg-surface-hover transition-colors"
           >
-            <span>{opt.label}</span>
-            <span className="text-xs text-muted">
-              {formatSnoozeTime(opt.epochMillis)}
-            </span>
+            Pick a date &amp; time…
           </button>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
 }
 
-function CustomModeButton({
+function QuickTimeButton({
   label,
-  active,
+  disabled,
   onClick,
 }: {
   label: string;
-  active: boolean;
+  disabled: boolean;
   onClick: () => void;
 }): ReactElement {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`
-        flex-1 text-xs px-2 py-1.5 rounded-md transition-colors
-        ${active ? "bg-accent-soft text-accent font-medium" : "text-muted hover:bg-surface-hover"}
-      `}
+      disabled={disabled}
+      className="flex-1 h-8 text-xs px-2 rounded-lg bg-accent-soft text-accent font-medium hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
     >
       {label}
     </button>
