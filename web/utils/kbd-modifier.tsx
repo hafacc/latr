@@ -11,6 +11,10 @@ import {
 
 const Ctx = createContext(false);
 
+export function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+}
+
 /** Tracks whether the platform command modifier (⌘/Ctrl) is held. */
 export function ModifierProvider({
   children,
@@ -20,8 +24,7 @@ export function ModifierProvider({
   const [held, setHeld] = useState(false);
 
   useEffect(() => {
-    const mac = /mac/i.test(navigator.platform);
-    const key = mac ? "Meta" : "Control";
+    const key = isMacPlatform() ? "Meta" : "Control";
     function onDown(e: KeyboardEvent) {
       if (e.key === key) setHeld(true);
     }

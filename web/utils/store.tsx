@@ -15,6 +15,7 @@ import {
 import type {
   CommitUndoSnapshot,
   DevicePartition,
+  LastRow,
   QuickTime,
   Row,
   SnoozeSource,
@@ -36,6 +37,8 @@ import {
 } from "./todo";
 
 // Most-recent-wins undo: "delete" restores via re-insert, "snooze"/"complete" via update.
+export const UNDO_MS = 5000;
+
 export type UndoKind = "delete" | "snooze" | "complete";
 export type UndoEntry = {
   kind: UndoKind;
@@ -88,7 +91,7 @@ export function uiReducer(state: UiState, action: UiAction): UiState {
       return {
         ...state,
         lastUndo: action.entry,
-        undoExpiresAt: Date.now() + 5000,
+        undoExpiresAt: Date.now() + UNDO_MS,
       };
     case "clearUndo":
       if (state.lastUndo === null && state.undoExpiresAt === null) return state;
@@ -103,7 +106,7 @@ type ContextShape = UiState & {
   now: number;
   holder: TodoStoreHolder;
   snoozeRows: Row[];
-  snoozeLastRow: { time: number; label: string } | null;
+  snoozeLastRow: LastRow | null;
   snoozeQuickTimes: QuickTime[];
   refreshNow: () => void;
   create: (text?: string) => Todo;

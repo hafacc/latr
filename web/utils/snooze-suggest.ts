@@ -432,7 +432,25 @@ export function resolveKey(keyId: string, now: Date): number | null {
   return epoch;
 }
 
-export type Row = { time: number; label: string; keyId: string; score: number };
+export type RowIcon =
+  | "offset"
+  | "todayDay"
+  | "todayNight"
+  | "tomorrow"
+  | "days"
+  | "weekday"
+  | "monthly";
+
+// `text` is the label without its time, for layouts that show the time in its own column.
+export type Row = {
+  time: number;
+  text: string;
+  icon: RowIcon;
+  keyId: string;
+  score: number;
+};
+
+export type LastRow = { time: number; text: string };
 
 // Lower wins: today/tomorrow, then named days (Wd/Wn/Dom/DomL), then counted ones (D/W/Mo), shorter period first.
 function tieRank(keyId: string): number {
@@ -536,7 +554,8 @@ export function rank(
 
     rows.push({
       time: best.time,
-      label: labelFor(best.key, best.time, nowDate),
+      text: labelParts(best.key, best.time, nowDate).text,
+      icon: rowIcon(best.key, best.time, nowDate),
       keyId: best.key,
       score: best.score,
     });
@@ -556,7 +575,7 @@ export function lastRow(
   now: number,
   rows: Row[],
   windowMs = DEFAULT_WINDOW_MS,
-): { time: number; label: string } | null {
+): LastRow | null {
   let best: { target: number; at: number } | null = null;
   for (const p of partitions) {
     if (p.lastCustom && (!best || p.lastCustom.at > best.at))
@@ -565,7 +584,7 @@ export function lastRow(
   if (!best || best.target <= now) return null;
   const target = best.target;
   if (rows.some((r) => Math.abs(r.time - target) <= windowMs)) return null;
-  return { time: target, label: `Last · ${formatFullDateTime(target)}` };
+  return { time: target, text: `Last · ${formatters().date.format(target)}` };
 }
 
 export type QuickTime = {
@@ -686,11 +705,6 @@ export function formatClock(epoch: number): string {
   return formatters().time.format(epoch);
 }
 
-function formatFullDateTime(epoch: number): string {
-  const { date, time } = formatters();
-  return `${date.format(epoch)}, ${time.format(epoch)}`;
-}
-
 export type DayPhrase =
   | "today"
   | "tomorrow"
@@ -769,30 +783,69 @@ const TODAY_BUCKET_TEXT: Record<Bucket, string> = {
   night: "Tonight",
 };
 
+export function labelParts(
+  keyId: string,
+  resolvedEpoch: number,
+  now: Date,
+): { text: string; time: string; parenthesized: boolean } {
+  const key = parseKey(keyId);
+  const time = formatClock(resolvedEpoch);
+  const resolved = new Date(resolvedEpoch);
+
+  if (key.kind === "offset") {
+    if (key.dateRule === "D0") {
+      const text =
+        key.hours <= LITTLE_WHILE_MAX_HOURS
+          ? "In a little while"
+          : "Much later";
+      return { text, time, parenthesized: true };
+    }
+    const { text } = dateLabelPart(key.dateRule, resolved, now);
+    return key.hours === 0
+      ? { text: `${text}, same time`, time, parenthesized: true }
+      : { text, time, parenthesized: false };
+  }
+
+  const region = bucketOf(minutesSince0500(resolved));
+  const { phrase } = dayPhraseOf(key.dateRule, resolved, now);
+  if (phrase === "today") {
+    return { text: TODAY_BUCKET_TEXT[region], time, parenthesized: false };
+  }
+  const { text, adjectival } = dateLabelPart(key.dateRule, resolved, now);
+  return {
+    text: adjectival ? `${text} ${region}` : text,
+    time,
+    parenthesized: false,
+  };
+}
+
 export function labelFor(
   keyId: string,
   resolvedEpoch: number,
   now: Date,
 ): string {
+  const { text, time, parenthesized } = labelParts(keyId, resolvedEpoch, now);
+  return parenthesized ? `${text} (${time})` : `${text}, ${time}`;
+}
+
+/** Mirrors Android's `rowIcon`. */
+export function rowIcon(
+  keyId: string,
+  resolvedEpoch: number,
+  now: Date,
+): RowIcon {
   const key = parseKey(keyId);
-  const timeStr = formatClock(resolvedEpoch);
+  if (key.kind === "offset") return "offset";
   const resolved = new Date(resolvedEpoch);
-
-  if (key.kind === "offset") {
-    if (key.dateRule === "D0") {
-      return key.hours <= LITTLE_WHILE_MAX_HOURS
-        ? `In a little while (${timeStr})`
-        : `Much later (${timeStr})`;
-    }
-    const { text } = dateLabelPart(key.dateRule, resolved, now);
-    return key.hours === 0
-      ? `${text}, same time (${timeStr})`
-      : `${text}, ${timeStr}`;
-  }
-
-  const region = bucketOf(minutesSince0500(resolved));
-  const { phrase } = dayPhraseOf(key.dateRule, resolved, now);
-  if (phrase === "today") return `${TODAY_BUCKET_TEXT[region]}, ${timeStr}`;
-  const { text, adjectival } = dateLabelPart(key.dateRule, resolved, now);
-  return adjectival ? `${text} ${region}, ${timeStr}` : `${text}, ${timeStr}`;
+  const { dist } = dayPhraseOf(key.dateRule, resolved, now);
+  const fam = familyOf(key.dateRule);
+  if (dist === 0) {
+    const region = bucketOf(minutesSince0500(resolved));
+    return region === "morning" || region === "afternoon"
+      ? "todayDay"
+      : "todayNight";
+  } else if (dist === 1) return "tomorrow";
+  else if (fam === "D" || fam === "W") return "days";
+  else if (fam === "Wd" || fam === "Wn") return "weekday";
+  else return "monthly";
 }

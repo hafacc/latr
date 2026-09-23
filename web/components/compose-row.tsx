@@ -1,14 +1,19 @@
 "use client";
 
-import { type ReactElement, useEffect, useRef, useState } from "react";
-import { FaPlus } from "react-icons/fa";
+import { type ReactElement, type RefObject, useEffect, useState } from "react";
 import { isEditableTarget } from "../utils/keyboard";
 import { useTodos } from "../utils/store";
 
-export default function ComposeRow(): ReactElement {
+export default function ComposeRow({
+  inputRef,
+  onCreated,
+}: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  onCreated: () => void;
+}): ReactElement {
   const { create, setFocus, setFilter, setSearch } = useTodos();
   const [draft, setDraft] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -19,7 +24,7 @@ export default function ComposeRow(): ReactElement {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [inputRef]);
 
   function submit() {
     const text = draft.trim();
@@ -31,19 +36,42 @@ export default function ComposeRow(): ReactElement {
     setFocus(null);
     setFilter("ACTIVE");
     setSearch("");
+    onCreated();
     setDraft("");
     // Keep focus on the compose input for fast-compose loop.
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  // On phones the row stays mounted but collapsed until the FAB focuses it, since iOS only raises the keyboard for a focus() inside the tap.
+  const collapsed = !focused && draft.length === 0;
+
   return (
-    <div className="group/compose flex items-center gap-3 px-4 py-2.5 rounded-xl bg-surface hover:bg-surface-hover transition-colors">
-      <FaPlus className="text-muted shrink-0 text-sm" />
+    <div
+      className={`
+        group/compose flex items-center gap-3 px-3 rounded-[10px] transition-colors
+        min-h-10
+        hover:bg-surface-hover focus-within:bg-surface focus-within:ring-1 focus-within:ring-accent
+        ${collapsed ? "max-md:min-h-0 max-md:h-0 max-md:overflow-hidden max-md:opacity-0" : "max-md:min-h-14"}
+      `}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="w-[18px] h-[18px] shrink-0 text-muted"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeDasharray="3 3"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="8.5" />
+      </svg>
       <input
         ref={inputRef}
         type="text"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
@@ -52,13 +80,14 @@ export default function ComposeRow(): ReactElement {
             (e.currentTarget as HTMLInputElement).blur();
           }
         }}
+        enterKeyHint={draft.trim().length === 0 ? "done" : "next"}
         placeholder="Add a todo…"
-        className="flex-1 min-w-0 bg-transparent outline-none text-text placeholder:text-muted py-1"
+        className="flex-1 min-w-0 bg-transparent outline-none text-text placeholder:text-text-secondary py-1 max-md:text-base"
       />
-      <kbd className="hidden sm:inline text-xs px-1.5 py-0.5 rounded-md bg-surface-muted text-muted font-sans group-focus-within/compose:hidden">
+      <kbd className="hidden md:inline text-[11.5px] font-medium px-1.5 rounded-md bg-surface border border-border text-text-secondary font-sans group-focus-within/compose:hidden">
         n
       </kbd>
-      <kbd className="hidden text-xs px-1.5 py-0.5 rounded-md bg-surface-muted text-muted font-sans group-focus-within/compose:sm:inline">
+      <kbd className="hidden text-[11.5px] font-medium px-1.5 rounded-md bg-surface border border-border text-text-secondary font-sans group-focus-within/compose:md:inline">
         ↵
       </kbd>
     </div>
