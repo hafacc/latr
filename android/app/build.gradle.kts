@@ -44,6 +44,12 @@ android {
     buildFeatures {
         compose = true
     }
+    sourceSets {
+        getByName("test") {
+            // Shared with web: web/utils/*.spec.ts read the same fixture.
+            resources.srcDir("../../testdata")
+        }
+    }
 }
 
 kotlin {
@@ -93,6 +99,8 @@ dependencies {
     implementation(libs.google.id)
 
     testImplementation(libs.junit)
+    // JVM unit tests only get Android's stubbed org.json.
+    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

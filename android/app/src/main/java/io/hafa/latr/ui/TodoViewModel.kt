@@ -3,10 +3,13 @@ package io.hafa.latr.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import io.hafa.latr.data.SnoozeStatsStore
 import io.hafa.latr.data.Todo
 import io.hafa.latr.data.TodoState
 import io.hafa.latr.data.TodoStoreHolder
-import io.hafa.latr.data.UserPreferences
+import io.hafa.latr.util.CommitResult
+import io.hafa.latr.util.LocalDateTimeUtil
+import io.hafa.latr.util.SnoozeStatsSnapshot
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -20,8 +23,9 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 class TodoViewModel(
     private val storeHolder: TodoStoreHolder,
-    private val userPreferences: UserPreferences
+    private val snoozeStatsStore: SnoozeStatsStore,
 ) : ViewModel() {
+    val snoozePartitions: StateFlow<List<SnoozeStatsSnapshot>> = snoozeStatsStore.partitions
     // null until the first snapshot; lets the UI show a spinner, not a false empty state.
     val todos: StateFlow<List<Todo>?> = storeHolder.store
         .flatMapLatest { it.observeAll() }
@@ -33,19 +37,10 @@ class TodoViewModel(
     private val _fastCreationId = MutableStateFlow<String?>(null)
     val fastCreationId: StateFlow<String?> = _fastCreationId
 
-    private val _lastCustomSnoozeTime = MutableStateFlow<String?>(null)
-    val lastCustomSnoozeTime: StateFlow<String?> = _lastCustomSnoozeTime
-
-    private val _morningMinutes = MutableStateFlow(userPreferences.morningMinutes)
-    val morningMinutes: StateFlow<Int> = _morningMinutes
-
-    private val _eveningMinutes = MutableStateFlow(userPreferences.eveningMinutes)
-    val eveningMinutes: StateFlow<Int> = _eveningMinutes
-
     // Most-recent-wins undo: Delete restores via re-insert, Snooze/Complete via update.
     private sealed interface UndoableAction {
         data class Delete(val todos: List<Todo>) : UndoableAction
-        data class Snooze(val previous: Todo) : UndoableAction
+        data class Snooze(val previous: Todo, val statsUndo: CommitResult) : UndoableAction
         data class Complete(val previous: Todo) : UndoableAction
     }
 
@@ -73,20 +68,6 @@ class TodoViewModel(
         undoExpiryJob = null
         _undoVisible.value = false
         _lastAction = null
-    }
-
-    fun setLastCustomSnoozeTime(time: String) {
-        _lastCustomSnoozeTime.value = time
-    }
-
-    fun setMorningMinutes(minutes: Int) {
-        userPreferences.morningMinutes = minutes
-        _morningMinutes.value = minutes
-    }
-
-    fun setEveningMinutes(minutes: Int) {
-        userPreferences.eveningMinutes = minutes
-        _eveningMinutes.value = minutes
     }
 
     private fun currentStore() = storeHolder.store.value
@@ -138,11 +119,19 @@ class TodoViewModel(
         )
     }
 
-    fun snoozeUndoable(todo: Todo, snoozeUntil: String) {
-        // Buffer the pre-snooze snapshot so undo restores its prior sort position.
-        _lastAction = UndoableAction.Snooze(todo)
-        armUndo()
-        updateTodo(todo.copy(snoozeUntil = snoozeUntil), touchModifiedAt = true)
+    /** [source] is "suggestion", "last", or "custom"; [pickedKey] is the suggestion row's key. False if [snoozeUntil] has passed. */
+    fun snoozeUndoable(todo: Todo, snoozeUntil: String, source: String, pickedKey: String?): Boolean {
+        val target = LocalDateTimeUtil.toEpochMillis(snoozeUntil)
+        if (target <= System.currentTimeMillis()) return false
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val statsUndo = snoozeStatsStore.commit(now, target, source, pickedKey)
+            // Buffer the pre-snooze snapshot so undo restores its prior sort position.
+            _lastAction = UndoableAction.Snooze(todo, statsUndo)
+            armUndo()
+            updateTodo(todo.copy(snoozeUntil = snoozeUntil), touchModifiedAt = true)
+        }
+        return true
     }
 
     fun setFocusId(todoId: String) {
@@ -182,7 +171,12 @@ class TodoViewModel(
     }
 
     fun signIn(onResult: (Result<Unit>) -> Unit = {}) {
-        viewModelScope.launch { onResult(storeHolder.signIn()) }
+        viewModelScope.launch {
+            val result = storeHolder.signIn()
+            // Even if the todo merge failed: a signed-in device must still share its learned history.
+            if (snoozeStatsStore.currentUidOrNull() != null) snoozeStatsStore.pushLocalPartition()
+            onResult(result)
+        }
     }
 
     fun signOut() {
@@ -190,7 +184,13 @@ class TodoViewModel(
     }
 
     fun deleteAccount(onResult: (Result<Unit>) -> Unit = {}) {
-        viewModelScope.launch { onResult(storeHolder.deleteAccount()) }
+        viewModelScope.launch {
+            val uid = snoozeStatsStore.currentUidOrNull()
+            val result = storeHolder.deleteAccount(
+                extraRemoteWipe = { if (uid != null) snoozeStatsStore.deleteRemote(uid) },
+            )
+            onResult(result)
+        }
     }
 
     fun undoLastAction() {
@@ -202,9 +202,10 @@ class TodoViewModel(
                     }
                 }
             is UndoableAction.Snooze ->
-                // Re-apply the snapshot verbatim (no modifiedAt touch) to keep sort position.
+                // Re-apply the snapshot verbatim (no modifiedAt touch) to keep sort position; also un-teach the stats store.
                 viewModelScope.launch {
                     currentStore().update(action.previous)
+                    snoozeStatsStore.undo(action.statsUndo)
                 }
             is UndoableAction.Complete ->
                 viewModelScope.launch {
@@ -222,12 +223,12 @@ class TodoViewModel(
 
 class TodoViewModelFactory(
     private val storeHolder: TodoStoreHolder,
-    private val userPreferences: UserPreferences
+    private val snoozeStatsStore: SnoozeStatsStore,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(TodoViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return TodoViewModel(storeHolder, userPreferences) as T
+            return TodoViewModel(storeHolder, snoozeStatsStore) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

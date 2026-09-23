@@ -311,9 +311,7 @@ fun TodoScreen(
     val todos by viewModel.todos.collectAsState()
     val focusId by viewModel.focusId.collectAsState()
     val fastCreationId by viewModel.fastCreationId.collectAsState()
-    val lastCustomSnoozeTime by viewModel.lastCustomSnoozeTime.collectAsState()
-    val morningMinutes by viewModel.morningMinutes.collectAsState()
-    val eveningMinutes by viewModel.eveningMinutes.collectAsState()
+    val snoozePartitions by viewModel.snoozePartitions.collectAsState()
 
     val undoVisible by viewModel.undoVisible.collectAsState()
 
@@ -358,24 +356,10 @@ fun TodoScreen(
                 showSnoozeSheet = false
                 todoToSnooze = null
             },
-            onSnoozeSelected = { isoDateTime ->
-                todoToSnooze?.let { todo ->
-                    viewModel.snoozeUndoable(todo, isoDateTime)
-                }
+            onSnoozeSelected = { isoDateTime, source, pickedKey ->
+                todoToSnooze?.let { todo -> viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey) } ?: false
             },
-            onCustomTimeSelected = { isoDateTime ->
-                viewModel.setLastCustomSnoozeTime(isoDateTime)
-            },
-            lastCustomSnoozeTime = lastCustomSnoozeTime,
-            morningMinutes = morningMinutes,
-            eveningMinutes = eveningMinutes,
-            onSetPreferredTime = { minutes ->
-                if (minutes < 720) {
-                    viewModel.setMorningMinutes(minutes)
-                } else {
-                    viewModel.setEveningMinutes(minutes)
-                }
-            }
+            partitions = snoozePartitions,
         )
     }
 

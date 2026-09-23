@@ -76,8 +76,8 @@ class TodoStoreHolder(
         authManager?.signOut()
     }
 
-    /** Copy state to Room, wipe remote, then delete the auth user (triggers sign-out). */
-    suspend fun deleteAccount(): Result<Unit> {
+    /** Copy state to Room, wipe remote, then delete the auth user (triggers sign-out). [extraRemoteWipe] runs while still authorized. */
+    suspend fun deleteAccount(extraRemoteWipe: suspend () -> Unit = {}): Result<Unit> {
         val am = authManager ?: return Result.success(Unit)
         // Reauth before wiping: a delete() that fails post-wipe could snapshot the empty remote over Room.
         val reauth = am.reauthenticateWithGoogle()
@@ -88,6 +88,11 @@ class TodoStoreHolder(
         if (wipe.isFailure) {
             Log.e(TAG, "delete-account remote wipe failed", wipe.exceptionOrNull())
             return wipe.map { }
+        }
+        val extraWipe = runCatching { extraRemoteWipe() }
+        if (extraWipe.isFailure) {
+            Log.e(TAG, "delete-account remote wipe failed", extraWipe.exceptionOrNull())
+            return extraWipe
         }
         return am.deleteCurrentUser()
     }
