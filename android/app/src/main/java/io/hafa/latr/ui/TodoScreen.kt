@@ -4,11 +4,14 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,11 +26,15 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -35,6 +42,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -42,40 +50,37 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material3.DockedSearchBar
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -84,15 +89,17 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -100,26 +107,36 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
@@ -140,11 +157,12 @@ import io.hafa.latr.ui.auth.photoUrl
 import io.hafa.latr.ui.auth.rememberAuthState
 import io.hafa.latr.ui.theme.LatrTheme
 import io.hafa.latr.util.LocalDateTimeUtil
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 private const val DAY_MILLIS = 24L * 60 * 60 * 1000
 
@@ -152,31 +170,39 @@ private fun StatusFilter.displayName(): String =
     name.lowercase().replaceFirstChar { it.uppercase() }
 
 private fun StatusFilter.icon(): ImageVector = when (this) {
-    StatusFilter.ALL -> Icons.AutoMirrored.Filled.List
-    StatusFilter.ACTIVE -> Icons.Default.RadioButtonUnchecked
-    StatusFilter.SNOOZED -> Icons.Default.Notifications
-    StatusFilter.DONE -> Icons.Filled.CheckCircle
+    StatusFilter.ALL -> Icons.AutoMirrored.Rounded.List
+    StatusFilter.ACTIVE -> Icons.Rounded.RadioButtonUnchecked
+    StatusFilter.SNOOZED -> Icons.Rounded.Schedule
+    StatusFilter.DONE -> Icons.Rounded.CheckCircle
 }
 
-@Composable
-private fun StatusFilter.iconTint() = when (this) {
-    StatusFilter.ALL, StatusFilter.ACTIVE -> MaterialTheme.colorScheme.onSurfaceVariant
-    StatusFilter.SNOOZED -> MaterialTheme.colorScheme.tertiary
-    StatusFilter.DONE -> MaterialTheme.colorScheme.primary
+private sealed class ListEntry {
+    data class Header(val label: String, val count: Int) : ListEntry()
+    data class Row(val todo: Todo) : ListEntry()
 }
 
-/** Horizontal drag pages [pagerState] to flip the filter; drags within [EDGE_REJECT_DP] of an edge defer to the OS back-gesture. */
+private fun entriesFor(todos: List<Todo>, filter: StatusFilter, searching: Boolean, nowMillis: Long): List<ListEntry> =
+    if (searching) {
+        todos.map { ListEntry.Row(it) }
+    } else {
+        groupForFilter(todos, filter, nowMillis).flatMap { group ->
+            listOf(ListEntry.Header(group.label, group.todos.size)) + group.todos.map { ListEntry.Row(it) }
+        }
+    }
+
+/** Horizontal drag pages [pagerState] to flip the filter; drags within [EDGE_REJECT_DP] of a screen edge defer to the OS back-gesture. */
 @Composable
 private fun Modifier.filterSwipe(
     pagerState: PagerState,
     scope: CoroutineScope
 ): Modifier {
     var dragStartPage by remember { mutableIntStateOf(0) }
-    var widthPx by remember { mutableIntStateOf(0) }
+    var leftInWindowPx by remember { mutableFloatStateOf(0f) }
     var rejectGesture by remember { mutableStateOf(false) }
     val edgePx = with(LocalDensity.current) { EDGE_REJECT_DP.dp.toPx() }
+    val windowWidthPx = LocalWindowInfo.current.containerSize.width
     return this
-        .onSizeChanged { widthPx = it.width }
+        .onGloballyPositioned { leftInWindowPx = it.positionInWindow().x }
         .draggable(
             state = rememberDraggableState { delta ->
                 if (!rejectGesture) {
@@ -185,8 +211,8 @@ private fun Modifier.filterSwipe(
             },
             orientation = Orientation.Horizontal,
             onDragStarted = { startedPosition ->
-                rejectGesture = startedPosition.x < edgePx ||
-                    startedPosition.x > widthPx - edgePx
+                val x = leftInWindowPx + startedPosition.x
+                rejectGesture = x < edgePx || x > windowWidthPx - edgePx
                 if (!rejectGesture) dragStartPage = pagerState.currentPage
             },
             onDragStopped = { velocity ->
@@ -211,6 +237,14 @@ private fun Modifier.filterSwipe(
 
 private const val EDGE_REJECT_DP = 24
 
+/** How far item [index]'s bottom sits below the list's unobscured area (0 if clear or not laid out). */
+private fun overflowPastBar(listState: LazyListState, index: Int): Float {
+    val layout = listState.layoutInfo
+    val item = layout.visibleItemsInfo.firstOrNull { it.index == index } ?: return 0f
+    val visibleEnd = layout.viewportEndOffset - layout.afterContentPadding
+    return (item.offset + item.size - visibleEnd).coerceAtLeast(0).toFloat()
+}
+
 // The horizontal swipe (row dismiss and filter pager) needs this multiple of the
 // base touch-slop, so a drag must be clearly horizontal to beat the list's scroll.
 private const val SWIPE_SLOP_MULTIPLIER = 2f
@@ -221,83 +255,236 @@ private fun inflatedSlop(base: ViewConfiguration): ViewConfiguration =
     }
 
 @Composable
-fun FilterIconButton(
-    selectedFilter: StatusFilter,
-    onFilterSelected: (StatusFilter) -> Unit,
-    isSignedIn: Boolean = false,
-    profilePhotoUrl: String? = null,
-    onSignInClick: () -> Unit = {},
-    onAccountClick: () -> Unit = {},
-    modifier: Modifier = Modifier
+private fun TopBar(
+    title: String,
+    count: Int?,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    searchOpen: Boolean,
+    onSearchOpenChange: (Boolean) -> Unit,
+    isSignedIn: Boolean,
+    profilePhotoUrl: String?,
+    onAccountClick: () -> Unit,
+    onSignInClick: () -> Unit,
+    onClearAll: (() -> Unit)?,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box(modifier = modifier.focusProperties { canFocus = false }) {
-        Box(
-            modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(color = MaterialTheme.colorScheme.surfaceContainerHigh)
-                .clickable { expanded = true },
-            contentAlignment = Alignment.Center
-        ) {
-            Crossfade(targetState = selectedFilter, label = "filterIcon") { filter ->
-                Icon(
-                    imageVector = filter.icon(),
-                    contentDescription = "Filter: ${filter.displayName()}",
-                    tint = filter.iconTint()
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            if (isSignedIn) {
-                DropdownMenuItem(
-                    text = { Text("Account") },
-                    leadingIcon = {
-                        ProfilePhoto(url = profilePhotoUrl, size = 24.dp)
-                    },
-                    onClick = {
-                        onAccountClick()
-                        expanded = false
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .padding(start = if (searchOpen) 4.dp else 20.dp, end = 8.dp, top = 8.dp)
+    ) {
+        AnimatedContent(targetState = searchOpen, label = "topBar", modifier = Modifier.weight(1f)) { open ->
+            if (open) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = {
+                        onSearchQueryChange("")
+                        onSearchOpenChange(false)
+                    }) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Close search")
                     }
-                )
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                "Search",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
+                        )
+                    }
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(Icons.Rounded.Clear, contentDescription = "Clear search")
+                        }
+                    }
+                }
+                LaunchedEffect(Unit) {
+                    withFrameNanos { }
+                    runCatching { focusRequester.requestFocus() }
+                }
             } else {
-                DropdownMenuItem(
-                    text = { Text("Sign in") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(title, style = MaterialTheme.typography.headlineSmall)
+                    if (count != null && count > 0) {
+                        Text(
+                            count.toString(),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 3.dp)
                         )
-                    },
-                    onClick = {
-                        onSignInClick()
-                        expanded = false
                     }
-                )
+                }
             }
-            HorizontalDivider()
-            TAB_ORDER.forEach { filter ->
-                DropdownMenuItem(
-                    text = { Text(filter.displayName()) },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = filter.icon(),
-                            contentDescription = null,
-                            tint = filter.iconTint()
-                        )
-                    },
-                    onClick = {
-                        onFilterSelected(filter)
-                        expanded = false
-                    }
+        }
+        if (!searchOpen) {
+            if (onClearAll != null) {
+                TextButton(onClick = onClearAll) { Text("Clear all") }
+            }
+            IconButton(onClick = { onSearchOpenChange(true) }) {
+                Icon(Icons.Rounded.Search, contentDescription = "Search")
+            }
+        }
+        IconButton(onClick = if (isSignedIn) onAccountClick else onSignInClick) {
+            if (isSignedIn) {
+                ProfilePhoto(url = profilePhotoUrl, size = 32.dp)
+            } else {
+                Icon(
+                    Icons.Rounded.AccountCircle,
+                    contentDescription = "Sign in",
+                    modifier = Modifier.size(32.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun FilterToolbar(
+    selected: StatusFilter,
+    onSelect: (StatusFilter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp,
+        shadowElevation = 3.dp,
+        modifier = modifier
+            .height(64.dp)
+            .focusProperties { canFocus = false }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        ) {
+            TAB_ORDER.forEach { filter ->
+                val isSelected = filter == selected
+                val background by animateColorAsState(
+                    if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                    label = "filterBackground",
+                )
+                val content = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clip(CircleShape)
+                        .background(background)
+                        .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(filter) })
+                        .animateContentSize()
+                        .padding(horizontal = if (isSelected) 16.dp else 12.dp)
+                ) {
+                    Icon(
+                        filter.icon(),
+                        contentDescription = if (isSelected) null else filter.displayName(),
+                        tint = content,
+                    )
+                    if (isSelected) {
+                        Text(
+                            filter.displayName(),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = content,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UndoSnackbar(label: String, onUndo: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        shadowElevation = 6.dp,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .padding(start = 16.dp, end = 8.dp)
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 14.sp), modifier = Modifier.weight(1f))
+            TextButton(onClick = onUndo) {
+                Text("Undo", color = MaterialTheme.colorScheme.inversePrimary, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(filter: StatusFilter, searchQuery: String) {
+    val (title, hint) = when {
+        searchQuery.isNotBlank() -> "No matches" to "Nothing matches \"$searchQuery\""
+        filter == StatusFilter.ACTIVE -> "Nothing to do" to "Tap + to add a todo"
+        filter == StatusFilter.SNOOZED -> "Nothing snoozed" to "Swipe a todo right to snooze it"
+        filter == StatusFilter.DONE -> "Nothing done yet" to "Swipe a todo left to complete it"
+        else -> "No todos yet" to "Tap + to add one"
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            filter.icon(),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier.size(56.dp)
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun GroupHeader(label: String, count: Int, modifier: Modifier = Modifier) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) { heading() }
+            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 6.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
     }
 }
 
@@ -314,13 +501,13 @@ fun TodoScreen(
     val snoozePartitions by viewModel.snoozePartitions.collectAsState()
 
     val undoVisible by viewModel.undoVisible.collectAsState()
+    val undoLabel by viewModel.undoLabel.collectAsState()
 
     var showSnoozeSheet by remember { mutableStateOf(false) }
     var todoToSnooze by remember { mutableStateOf<Todo?>(null) }
     val authState = rememberAuthState(authManager)
     var showSignInSheet by remember { mutableStateOf(false) }
     var showAccountSheet by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
     TodoScreenContent(
@@ -342,6 +529,7 @@ fun TodoScreen(
         onClearAllDone = { viewModel.clearAllDone() },
         onUndoLastDelete = { viewModel.undoLastAction() },
         undoVisible = undoVisible,
+        undoLabel = undoLabel,
         onDismissUndo = { viewModel.dismissUndo() },
         isSignedIn = authState.isSignedIn,
         profilePhotoUrl = authState.photoUrl,
@@ -360,6 +548,7 @@ fun TodoScreen(
                 todoToSnooze?.let { todo -> viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey) } ?: false
             },
             partitions = snoozePartitions,
+            todoText = todoToSnooze?.text.orEmpty(),
         )
     }
 
@@ -428,6 +617,7 @@ fun TodoScreenContent(
     onClearAllDone: (() -> Unit)? = null,
     onUndoLastDelete: (() -> Unit)? = null,
     undoVisible: Boolean = false,
+    undoLabel: String = "",
     onDismissUndo: () -> Unit = {},
     isSignedIn: Boolean = false,
     profilePhotoUrl: String? = null,
@@ -444,6 +634,7 @@ fun TodoScreenContent(
     val hapticFeedback = LocalHapticFeedback.current
     val pullToRefreshState = rememberPullToRefreshState()
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
     var savedPage by rememberSaveable { mutableIntStateOf(TAB_ORDER.indexOf(initialStatusFilter)) }
     val pagerState = rememberPagerState(initialPage = savedPage) { TAB_ORDER.size }
     val statusFilter = TAB_ORDER[pagerState.settledPage]
@@ -458,6 +649,11 @@ fun TodoScreenContent(
         val visible = todos ?: emptyList()
         TAB_ORDER.associateWith { filter ->
             visible.filterAndSort(filter, searchQuery, nowMillis)
+        }
+    }
+    val entriesByFilter = remember(filteredTodosByFilter, nowMillis) {
+        filteredTodosByFilter.mapValues { (filter, list) ->
+            entriesFor(list, filter, searchQuery.isNotBlank(), nowMillis)
         }
     }
     val filteredTodos = filteredTodosByFilter[statusFilter] ?: emptyList()
@@ -501,6 +697,11 @@ fun TodoScreenContent(
         onClearFocus()
     }
 
+    BackHandler(enabled = focusId == null && searchOpen) {
+        searchQuery = ""
+        searchOpen = false
+    }
+
     // Clear focus when keyboard is dismissed (e.g. swipe down)
     val imeVisible = WindowInsets.isImeVisible
     LaunchedEffect(imeVisible) {
@@ -511,19 +712,28 @@ fun TodoScreenContent(
     }
 
     // Use rememberUpdatedState so snapshotFlow reads current list, not a stale capture
-    val currentFilteredTodos by rememberUpdatedState(filteredTodos)
+    val currentEntries by rememberUpdatedState(entriesByFilter[statusFilter] ?: emptyList())
 
-    // Scroll to focused todo
+    // Scroll to focused todo, keeping it clear of the floating bar that overlays the list's bottom padding
     LaunchedEffect(focusId, pagerState.settledPage) {
         if (focusId != null) {
             val index = snapshotFlow {
-                currentFilteredTodos.indexOfFirst { it.id == focusId }
+                currentEntries.indexOfFirst { it is ListEntry.Row && it.todo.id == focusId }
             }.first { it >= 0 }
             val listState = listStates[pagerState.settledPage]
-            val isVisible = listState.layoutInfo.visibleItemsInfo.any { it.index == index }
-            if (!isVisible) {
+            val info = listState.layoutInfo
+            val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+            if (item == null || item.offset < info.viewportStartOffset) {
                 listState.scrollToItem(index)
+            } else {
+                listState.scrollBy(overflowPastBar(listState, index))
             }
+            // The keyboard shrinking the viewport, or the row growing, can push it under the bar.
+            snapshotFlow {
+                val layout = listState.layoutInfo
+                layout.viewportEndOffset - layout.afterContentPadding to
+                    layout.visibleItemsInfo.firstOrNull { it.index == index }?.size
+            }.drop(1).collect { listState.scrollBy(overflowPastBar(listState, index)) }
         }
     }
 
@@ -539,65 +749,90 @@ fun TodoScreenContent(
             }
     }
 
+    val clearAll: (() -> Unit)? =
+        if (statusFilter == StatusFilter.DONE && filteredTodos.isNotEmpty() && onClearAllDone != null) {
+            {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                focusManager.clearFocus()
+                onClearFocus()
+                onClearAllDone()
+            }
+        } else {
+            null
+        }
+
     Scaffold(
         modifier = modifier.imePadding(),
+        topBar = {
+            Box(modifier = Modifier.statusBarsPadding()) {
+                TopBar(
+                    title = statusFilter.displayName(),
+                    count = if (todos == null) null else filteredTodos.size,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    searchOpen = searchOpen,
+                    onSearchOpenChange = { searchOpen = it },
+                    isSignedIn = isSignedIn,
+                    profilePhotoUrl = profilePhotoUrl,
+                    onAccountClick = onAccountClick,
+                    onSignInClick = onSignInClick,
+                    onClearAll = clearAll,
+                )
+            }
+        },
         bottomBar = {
-            Row(
+            Column(
                 modifier = Modifier
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .filterSwipe(pagerState, scope),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                FilterIconButton(
-                    selectedFilter = statusFilter,
-                    onFilterSelected = { filter ->
-                        scope.launch { pagerState.animateScrollToPage(TAB_ORDER.indexOf(filter)) }
-                    },
-                    isSignedIn = isSignedIn,
-                    profilePhotoUrl = profilePhotoUrl,
-                    onSignInClick = onSignInClick,
-                    onAccountClick = onAccountClick
-                )
-
-                DockedSearchBar(
-                    inputField = {
-                        SearchBarDefaults.InputField(
-                            query = searchQuery,
-                            onQueryChange = { searchQuery = it },
-                            onSearch = { focusManager.clearFocus() },
-                            expanded = false,
-                            onExpandedChange = {},
-                            placeholder = { Text("Search in Latr") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            trailingIcon = if (searchQuery.isNotEmpty()) {
-                                {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(
-                                            Icons.Default.Clear,
-                                            contentDescription = "Clear search"
-                                        )
-                                    }
-                                }
-                            } else null
-                        )
-                    },
-                    expanded = false,
-                    onExpandedChange = {},
-                    modifier = Modifier.weight(1f)
-                ) {}
-
-                FilledTonalIconButton(
-                    onClick = {
-                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                        searchQuery = ""
-                        scope.launch { pagerState.animateScrollToPage(DEFAULT_TAB) }
-                        onCreateTodo()
-                    },
-                    modifier = Modifier.size(56.dp)
+                AnimatedVisibility(
+                    visible = undoVisible,
+                    enter = slideInVertically { it / 2 } + fadeIn(),
+                    exit = slideOutVertically { it / 2 } + fadeOut(),
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add todo")
+                    UndoSnackbar(
+                        label = undoLabel,
+                        onUndo = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onUndoLastDelete?.invoke()
+                        },
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    val toolbarBaseSlop = LocalViewConfiguration.current
+                    val toolbarSlop = remember(toolbarBaseSlop) { inflatedSlop(toolbarBaseSlop) }
+                    CompositionLocalProvider(LocalViewConfiguration provides toolbarSlop) {
+                        FilterToolbar(
+                            selected = statusFilter,
+                            onSelect = { filter ->
+                                scope.launch { pagerState.animateScrollToPage(TAB_ORDER.indexOf(filter)) }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .filterSwipe(pagerState, scope)
+                        )
+                    }
+                    FloatingActionButton(
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            searchQuery = ""
+                            searchOpen = false
+                            scope.launch { pagerState.animateScrollToPage(DEFAULT_TAB) }
+                            onCreateTodo()
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 3.dp),
+                        modifier = Modifier
+                            .size(64.dp)
+                            .focusProperties { canFocus = false }
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Add todo")
+                    }
                 }
             }
         }
@@ -610,8 +845,7 @@ fun TodoScreenContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = innerPadding.calculateBottomPadding())
-                .statusBarsPadding()
+                .padding(top = innerPadding.calculateTopPadding())
                 .filterSwipe(pagerState, scope)
         ) {
             CompositionLocalProvider(LocalViewConfiguration provides baseSlop) {
@@ -621,7 +855,7 @@ fun TodoScreenContent(
                 modifier = Modifier.fillMaxSize()
             ) { pageIndex ->
                 val pageFilter = TAB_ORDER[pageIndex]
-                val pageTodos = filteredTodosByFilter[pageFilter] ?: emptyList()
+                val pageEntries = entriesByFilter[pageFilter] ?: emptyList()
 
                 PullToRefreshBox(
                     state = pullToRefreshState,
@@ -647,130 +881,89 @@ fun TodoScreenContent(
                     if (todos == null) {
                         // Pre-first-snapshot: spinner, not a false "no todos".
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
-                    } else if (pageTodos.isEmpty()) {
-                        val message = if (searchQuery.isBlank()) {
-                            "No todos yet. Tap + to add one."
-                        } else {
-                            "No todos match \"$searchQuery\""
-                        }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = message,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    } else if (pageEntries.isEmpty()) {
+                        Box(Modifier.padding(bottom = innerPadding.calculateBottomPadding())) {
+                            EmptyState(filter = pageFilter, searchQuery = searchQuery)
                         }
                     } else {
                         LazyColumn(
                             state = listStates[pageIndex],
+                            contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding() + 8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            items(pageTodos, key = { it.id }) { todo ->
-                                val snoozed = todo.isSnoozed(nowMillis)
-                                TodoItem(
-                                    todo = todo,
-                                    shouldRequestFocus = todo.id == focusId,
-                                    snoozed = snoozed,
-                                    isInFastComposeMode = fastCreationId != null && todo.id == focusId,
-                                    onFocused = onTodoFocused,
-                                    onBlurred = onTodoBlurred,
-                                    onUpdate = { updatedTodo, touchModifiedAt ->
-                                        // Snoozed-ness, not raw snoozeUntil: a swipe-reactivate
-                                        // only moves that, but so does editing an unsnoozed row —
-                                        // and that must not kick you out of the editor.
-                                        if (updatedTodo.state != todo.state ||
-                                            updatedTodo.isSnoozed(nowMillis) != snoozed
-                                        ) {
-                                            focusManager.clearFocus()
-                                            onClearFocus()
-                                        }
-                                        onUpdateTodo(updatedTodo, touchModifiedAt)
-                                    },
-                                    onDelete = {
-                                        focusManager.clearFocus()
-                                        onClearFocus()
-                                        onDeleteTodo(todo)
-                                    },
-                                    onSwipeDelete = {
-                                        focusManager.clearFocus()
-                                        onClearFocus()
-                                        onSwipeDeleteTodo(todo)
-                                    },
-                                    onComplete = {
-                                        focusManager.clearFocus()
-                                        onClearFocus()
-                                        onCompleteTodo(todo)
-                                    },
-                                    onSnooze = {
-                                        focusManager.clearFocus()
-                                        onClearFocus()
-                                        onRequestSnooze(todo)
-                                    },
-                                    onTogglePin = if (todo.state == TodoState.DONE) {
-                                        null
-                                    } else {
-                                        {
-                                            // Only an active row drops its was-snoozed marker.
-                                            val snoozeUntil =
-                                                if (snoozed) todo.snoozeUntil else null
-                                            onUpdateTodo(
-                                                todo.copy(pinned = !todo.pinned, snoozeUntil = snoozeUntil),
-                                                true,
-                                            )
-                                        }
-                                    },
-                                    onCreateNewTodo = onCreateTodo,
-                                    modifier = Modifier.animateItem()
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            AnimatedVisibility(
-                visible = undoVisible || (statusFilter == StatusFilter.DONE && filteredTodos.isNotEmpty()),
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AnimatedContent(targetState = undoVisible, label = "undoDelete") { isUndoPending ->
-                        TextButton(
-                            onClick = {
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                if (isUndoPending) {
-                                    onUndoLastDelete?.invoke()
-                                } else {
-                                    focusManager.clearFocus()
-                                    onClearFocus()
-                                    onClearAllDone?.invoke()
+                            items(
+                                pageEntries,
+                                key = { entry ->
+                                    when (entry) {
+                                        is ListEntry.Header -> "header:${entry.label}"
+                                        is ListEntry.Row -> entry.todo.id
+                                    }
+                                },
+                                contentType = { entry -> if (entry is ListEntry.Header) "header" else "todo" },
+                            ) { entry ->
+                                when (entry) {
+                                    is ListEntry.Header -> GroupHeader(entry.label, entry.count, Modifier.animateItem())
+                                    is ListEntry.Row -> {
+                                        val todo = entry.todo
+                                        val snoozed = todo.isSnoozed(nowMillis)
+                                        TodoItem(
+                                            todo = todo,
+                                            shouldRequestFocus = todo.id == focusId,
+                                            snoozed = snoozed,
+                                            isInFastComposeMode = fastCreationId != null && todo.id == focusId,
+                                            onFocused = onTodoFocused,
+                                            onBlurred = onTodoBlurred,
+                                            onUpdate = { updatedTodo, touchModifiedAt ->
+                                                // Snoozed-ness, not raw snoozeUntil: a swipe-reactivate
+                                                // only moves that, but so does editing an unsnoozed row —
+                                                // and that must not kick you out of the editor.
+                                                if (updatedTodo.state != todo.state ||
+                                                    updatedTodo.isSnoozed(nowMillis) != snoozed
+                                                ) {
+                                                    focusManager.clearFocus()
+                                                    onClearFocus()
+                                                }
+                                                onUpdateTodo(updatedTodo, touchModifiedAt)
+                                            },
+                                            onDelete = {
+                                                focusManager.clearFocus()
+                                                onClearFocus()
+                                                onDeleteTodo(todo)
+                                            },
+                                            onSwipeDelete = {
+                                                focusManager.clearFocus()
+                                                onClearFocus()
+                                                onSwipeDeleteTodo(todo)
+                                            },
+                                            onComplete = {
+                                                focusManager.clearFocus()
+                                                onClearFocus()
+                                                onCompleteTodo(todo)
+                                            },
+                                            onSnooze = {
+                                                focusManager.clearFocus()
+                                                onClearFocus()
+                                                onRequestSnooze(todo)
+                                            },
+                                            onTogglePin = if (todo.state == TodoState.DONE) {
+                                                null
+                                            } else {
+                                                {
+                                                    // Only an active row drops its was-snoozed marker.
+                                                    val snoozeUntil =
+                                                        if (snoozed) todo.snoozeUntil else null
+                                                    onUpdateTodo(
+                                                        todo.copy(pinned = !todo.pinned, snoozeUntil = snoozeUntil),
+                                                        true,
+                                                    )
+                                                }
+                                            },
+                                            onCreateNewTodo = onCreateTodo,
+                                            modifier = Modifier.animateItem()
+                                        )
+                                    }
                                 }
-                            },
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
-                        ) {
-                            Icon(
-                                if (isUndoPending) Icons.Default.Refresh else Icons.Default.Delete,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = if (isUndoPending) "Undo" else "Clear all done",
-                                modifier = Modifier.padding(start = 4.dp)
-                            )
+                            }
                         }
                     }
                 }
@@ -780,6 +973,16 @@ fun TodoScreenContent(
         }
     }
 }
+
+/** A swipe background's soft and armed (past the threshold) fills, icon and label. */
+private data class SwipeLook(
+    val soft: Color,
+    val onSoft: Color,
+    val armed: Color,
+    val onArmed: Color,
+    val icon: ImageVector,
+    val label: String,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -910,51 +1113,62 @@ fun TodoItem(
             scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
         },
         backgroundContent = {
-            val direction = dismissState.dismissDirection
-            val colorScheme = MaterialTheme.colorScheme
-            val done = todo.state == TodoState.DONE
-            val (backgroundColor, icon, iconTint) = when (direction) {
-                SwipeToDismissBoxValue.EndToStart ->
-                    if (done) {
-                        Triple(colorScheme.error, Icons.Default.Delete, colorScheme.onError)
-                    } else {
-                        Triple(colorScheme.primary, Icons.Default.Check, colorScheme.onPrimary)
-                    }
+            val direction by remember { derivedStateOf { dismissState.dismissDirection } }
+            if (direction != SwipeToDismissBoxValue.Settled) {
+                val colorScheme = MaterialTheme.colorScheme
+                val done = todo.state == TodoState.DONE
+                val look = when (direction) {
+                    SwipeToDismissBoxValue.EndToStart ->
+                        if (done) {
+                            SwipeLook(
+                                colorScheme.errorContainer, colorScheme.onErrorContainer,
+                                colorScheme.error, colorScheme.onError, Icons.Rounded.Delete, "Delete",
+                            )
+                        } else {
+                            SwipeLook(
+                                colorScheme.primaryContainer, colorScheme.onPrimaryContainer,
+                                colorScheme.primary, colorScheme.onPrimary, Icons.Rounded.Check, "Done",
+                            )
+                        }
 
-                SwipeToDismissBoxValue.StartToEnd ->
-                    if (done || snoozed) {
-                        Triple(
-                            colorScheme.secondary,
-                            Icons.Default.Refresh,
-                            colorScheme.onSecondary
-                        )
+                    else ->
+                        if (done || snoozed) {
+                            SwipeLook(
+                                colorScheme.secondaryContainer, colorScheme.onSecondaryContainer,
+                                colorScheme.secondary, colorScheme.onSecondary, Icons.Rounded.Restore, "Restore",
+                            )
+                        } else {
+                            SwipeLook(
+                                colorScheme.tertiaryContainer, colorScheme.onTertiaryContainer,
+                                colorScheme.tertiary, colorScheme.onTertiary, Icons.Rounded.Schedule, "Snooze",
+                            )
+                        }
+                }
+                val armed by remember { derivedStateOf { dismissState.targetValue != SwipeToDismissBoxValue.Settled } }
+                LaunchedEffect(armed) {
+                    if (armed) hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                }
+                val background by animateColorAsState(if (armed) look.armed else look.soft, label = "swipeFill")
+                val content by animateColorAsState(if (armed) look.onArmed else look.onSoft, label = "swipeInk")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (direction == SwipeToDismissBoxValue.EndToStart) {
+                        Arrangement.spacedBy(8.dp, Alignment.End)
                     } else {
-                        Triple(
-                            colorScheme.tertiary,
-                            Icons.Default.Notifications,
-                            colorScheme.onTertiary
-                        )
+                        Arrangement.spacedBy(8.dp, Alignment.Start)
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(background)
+                        .padding(horizontal = 24.dp)
+                ) {
+                    if (direction == SwipeToDismissBoxValue.EndToStart) {
+                        Text(look.label, color = content, style = MaterialTheme.typography.labelLarge)
+                        Icon(look.icon, contentDescription = null, tint = content)
+                    } else {
+                        Icon(look.icon, contentDescription = null, tint = content)
+                        Text(look.label, color = content, style = MaterialTheme.typography.labelLarge)
                     }
-
-                else -> Triple(Color.Transparent, null, Color.Transparent)
-            }
-            val alignment = when (direction) {
-                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                else -> Alignment.CenterStart
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(backgroundColor)
-                    .padding(horizontal = 16.dp),
-                contentAlignment = alignment
-            ) {
-                icon?.let {
-                    Icon(
-                        it,
-                        contentDescription = null,
-                        tint = iconTint
-                    )
                 }
             }
         },
@@ -962,11 +1176,33 @@ fun TodoItem(
     ) {
         // Restore base slop inside the row so taps/long-press aren't dulled by the swipe's inflated slop.
         CompositionLocalProvider(LocalViewConfiguration provides baseViewConfig) {
+        val displaced by remember { derivedStateOf { dismissState.dismissDirection != SwipeToDismissBoxValue.Settled } }
+        val cornerRadius = animateDpAsState(if (displaced) 16.dp else 0.dp, tween(150), label = "rowCorner")
+        val rowColor = MaterialTheme.colorScheme.surfaceContainerLowest
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
+                .heightIn(min = 56.dp)
+                .drawBehind {
+                    val radius = cornerRadius.value.toPx()
+                    drawRoundRect(rowColor, cornerRadius = CornerRadius(radius, radius))
+                }
+                .semantics {
+                    val done = todo.state == TodoState.DONE
+                    val restore = CustomAccessibilityAction("Restore") {
+                        currentOnUpdate(currentTodo.copy(state = TodoState.ACTIVE, snoozeUntil = null), true)
+                        true
+                    }
+                    customActions = if (done) {
+                        listOf(restore, CustomAccessibilityAction("Delete") { currentOnSwipeDelete(); true })
+                    } else {
+                        listOf(
+                            CustomAccessibilityAction("Complete") { currentOnComplete(); true },
+                            if (snoozed) restore else CustomAccessibilityAction("Snooze") { currentOnSnooze(); true },
+                        )
+                    }
+                }
                 // combinedClickable (not detectTapGestures) so taps arbitrate with the swipe/scroll parents.
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -980,38 +1216,38 @@ fun TodoItem(
                         caretFromTap = null
                     },
                 )
-                .padding(horizontal = 16.dp, vertical = 16.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
             val colorScheme = MaterialTheme.colorScheme
             // Pinned displaces the state dot only on an active row; elsewhere it just
             // tints it. A done row is already primary, so it needs no branch.
             val showsPin = todo.pinned && todo.state != TodoState.DONE && !snoozed
             val (stateIcon, stateIconTint) = when {
-                todo.state == TodoState.DONE -> Icons.Filled.CheckCircle to colorScheme.primary
-                snoozed -> Icons.Filled.Notifications to
+                todo.state == TodoState.DONE -> Icons.Rounded.CheckCircle to colorScheme.primary
+                snoozed -> Icons.Rounded.Schedule to
                     if (todo.pinned) colorScheme.primary else colorScheme.tertiary
 
                 showsPin -> Icons.Outlined.PushPin to colorScheme.primary
-                todo.snoozeUntil != null -> Icons.Outlined.Notifications to colorScheme.tertiary  // Was snoozed, now active
-                else -> Icons.Default.RadioButtonUnchecked to colorScheme.onSurfaceVariant
+                todo.snoozeUntil != null -> Icons.Outlined.Schedule to colorScheme.tertiary  // Was snoozed, now active
+                else -> Icons.Rounded.RadioButtonUnchecked to colorScheme.onSurfaceVariant
             }
             // Shared by the display Text and editor so entering edit doesn't shift the text.
-            val editorTextStyle = TextStyle(
-                fontSize = 16.sp,
+            val editorTextStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = if (todo.state == TodoState.DONE) colorScheme.onSurfaceVariant
                 else colorScheme.onSurface,
                 textDecoration = if (todo.state == TodoState.DONE)
                     TextDecoration.LineThrough else TextDecoration.None,
             )
-            val placeholderTextStyle = TextStyle(
-                fontSize = 16.sp,
+            val placeholderTextStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = colorScheme.onSurfaceVariant,
             )
             Icon(
                 imageVector = stateIcon,
                 contentDescription = if (todo.pinned) "Pinned" else null,
                 tint = stateIconTint,
-                modifier = Modifier.padding(end = 12.dp)
+                modifier = Modifier
+                    .padding(end = 16.dp)
+                    .size(22.dp)
             )
             Column(modifier = Modifier.weight(1f)) {
                 if (editing) {
@@ -1117,13 +1353,14 @@ fun TodoItem(
                     // Re-key on the 24h boundary (where formatSnoozeTime's format flips) so an aged row re-formats; still memoized for scroll.
                     val within24h =
                         abs(snoozeMillis - System.currentTimeMillis()) < DAY_MILLIS
-                    val snoozeLabel = remember(snoozeMillis, within24h) {
-                        LocalDateTimeUtil.formatSnoozeTime(snoozeMillis, context)
+                    val snoozeLabel = remember(snoozeMillis, within24h, snoozed) {
+                        val time = LocalDateTimeUtil.formatSnoozeTime(snoozeMillis, context)
+                        if (snoozed) time else "Unsnoozed · $time"
                     }
                     Text(
                         text = snoozeLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (snoozed) colorScheme.tertiary else colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1136,7 +1373,7 @@ fun TodoItem(
 @Preview(showBackground = true)
 @Composable
 private fun TodoScreenEmptyPreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoScreenContent(
             todos = emptyList(),
             onCreateTodo = {},
@@ -1151,10 +1388,10 @@ private fun TodoScreenEmptyPreview() {
 @Preview(showBackground = true)
 @Composable
 private fun TodoScreenWithItemsPreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoScreenContent(
             todos = listOf(
-                Todo(id = "1", text = "Buy groceries"),
+                Todo(id = "1", text = "Buy groceries", pinned = true),
                 Todo(id = "2", text = "Walk the dog", snoozeUntil = "2024-01-15T10:00:00"),
                 Todo(id = "3", text = "Finish project report")
             ),
@@ -1162,59 +1399,25 @@ private fun TodoScreenWithItemsPreview() {
             onUpdateTodo = { _, _ -> },
             onDeleteTodo = {},
             onTodoFocused = {},
-            onRequestSnooze = {}
+            onRequestSnooze = {},
+            undoVisible = true,
+            undoLabel = "Completed",
         )
     }
 }
 
-@Preview(showBackground = true, name = "Filter - Active")
+@Preview(showBackground = true, name = "Toolbar")
 @Composable
-private fun FilterIconButtonPreview_Active() {
-    LatrTheme {
-        FilterIconButton(
-            selectedFilter = StatusFilter.ACTIVE,
-            onFilterSelected = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Filter - Snoozed")
-@Composable
-private fun FilterIconButtonPreview_Snoozed() {
-    LatrTheme {
-        FilterIconButton(
-            selectedFilter = StatusFilter.SNOOZED,
-            onFilterSelected = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Filter - Done")
-@Composable
-private fun FilterIconButtonPreview_Done() {
-    LatrTheme {
-        FilterIconButton(
-            selectedFilter = StatusFilter.DONE,
-            onFilterSelected = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Filter - All")
-@Composable
-private fun FilterIconButtonPreview_All() {
-    LatrTheme {
-        FilterIconButton(
-            selectedFilter = StatusFilter.ALL,
-            onFilterSelected = {}
-        )
+private fun FilterToolbarPreview() {
+    LatrTheme(dynamicColor = false) {
+        FilterToolbar(selected = StatusFilter.ACTIVE, onSelect = {})
     }
 }
 
 @Preview(showBackground = true)
 @Composable
 private fun TodoItemPreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoItem(
             todo = Todo(id = "1", text = "Sample todo item"),
             shouldRequestFocus = false,
@@ -1227,27 +1430,10 @@ private fun TodoItemPreview() {
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-private fun TodoItemEmptyPreview() {
-    LatrTheme {
-        TodoItem(
-            todo = Todo(id = "1", text = ""),
-            shouldRequestFocus = false,
-            onFocused = {},
-            onBlurred = {},
-            onUpdate = { _, _ -> },
-            onDelete = {},
-            onSnooze = {},
-            onCreateNewTodo = {}
-        )
-    }
-}
-
 @Preview(showBackground = true, name = "Todo - Done")
 @Composable
 private fun TodoItemDonePreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoItem(
             todo = Todo(id = "1", text = "Completed task", state = TodoState.DONE),
             shouldRequestFocus = false,
@@ -1260,10 +1446,10 @@ private fun TodoItemDonePreview() {
     }
 }
 
-@Preview(showBackground = true, name = "Todo - Snoozed (within 24h)")
+@Preview(showBackground = true, name = "Todo - Snoozed")
 @Composable
-private fun TodoItemSnoozedSoonPreview() {
-    LatrTheme {
+private fun TodoItemSnoozedPreview() {
+    LatrTheme(dynamicColor = false) {
         TodoItem(
             todo = Todo(
                 id = "1",
@@ -1283,33 +1469,10 @@ private fun TodoItemSnoozedSoonPreview() {
     }
 }
 
-@Preview(showBackground = true, name = "Todo - Snoozed (beyond 24h)")
-@Composable
-private fun TodoItemSnoozedLaterPreview() {
-    LatrTheme {
-        TodoItem(
-            todo = Todo(
-                id = "1",
-                text = "Snoozed for later",
-                snoozeUntil = LocalDateTimeUtil.fromEpochMillis(
-                    System.currentTimeMillis() + 3 * 24 * 60 * 60 * 1000
-                )
-            ),
-            shouldRequestFocus = false,
-            snoozed = true,
-            onFocused = {},
-            onUpdate = { _, _ -> },
-            onDelete = {},
-            onSnooze = {},
-            onCreateNewTodo = {}
-        )
-    }
-}
-
 @Preview(showBackground = true, name = "Todo - Was Snoozed (now active)")
 @Composable
 private fun TodoItemWasSnoozedPreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoItem(
             todo = Todo(
                 id = "1",
@@ -1332,17 +1495,11 @@ private fun TodoItemWasSnoozedPreview() {
 @Preview(showBackground = true, name = "Screen - Snoozed Filter")
 @Composable
 private fun TodoScreenSnoozedPreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoScreenContent(
             todos = listOf(
-                Todo(
-                    id = "1", text = "Call mom",
-                    snoozeUntil = "2024-01-20T09:00:00"
-                ),
-                Todo(
-                    id = "2", text = "Review PR",
-                    snoozeUntil = "2024-01-16T14:00:00"
-                ),
+                Todo(id = "1", text = "Call mom", snoozeUntil = "2030-01-20T09:00:00"),
+                Todo(id = "2", text = "Review PR", snoozeUntil = "2030-01-16T14:00:00"),
             ),
             onCreateTodo = {},
             onUpdateTodo = { _, _ -> },
@@ -1357,7 +1514,7 @@ private fun TodoScreenSnoozedPreview() {
 @Preview(showBackground = true, name = "Screen - Done Filter")
 @Composable
 private fun TodoScreenDonePreview() {
-    LatrTheme {
+    LatrTheme(dynamicColor = false) {
         TodoScreenContent(
             todos = listOf(
                 Todo(id = "1", text = "Buy groceries", state = TodoState.DONE),
@@ -1368,30 +1525,8 @@ private fun TodoScreenDonePreview() {
             onDeleteTodo = {},
             onTodoFocused = {},
             onRequestSnooze = {},
+            onClearAllDone = {},
             initialStatusFilter = StatusFilter.DONE
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Screen - Mixed (All Filter)")
-@Composable
-private fun TodoScreenAllPreview() {
-    LatrTheme {
-        TodoScreenContent(
-            todos = listOf(
-                Todo(id = "1", text = "Active task", state = TodoState.ACTIVE),
-                Todo(
-                    id = "2", text = "Snoozed task",
-                    snoozeUntil = "2024-01-20T09:00:00"
-                ),
-                Todo(id = "3", text = "Done task", state = TodoState.DONE),
-            ),
-            onCreateTodo = {},
-            onUpdateTodo = { _, _ -> },
-            onDeleteTodo = {},
-            onTodoFocused = {},
-            onRequestSnooze = {},
-            initialStatusFilter = StatusFilter.ALL
         )
     }
 }
