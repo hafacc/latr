@@ -30,8 +30,6 @@ jobs:
       - run: bun lint
 
       - run: bun export
-        env:
-          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
 
       - uses: actions/configure-pages@v6
 

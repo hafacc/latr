@@ -71,7 +71,7 @@ Track features and behavior here. When making changes, verify existing behavior 
 - Online status comes from `useOnlineStatus` (`utils/use-online-status.ts`), a `useSyncExternalStore` hook reading `navigator.onLine` live so online/offline event ordering can't leave a stale value
 
 ### Offline & install (web)
-- The web app is an installable PWA that opens with no connection. `app/manifest.ts` is the manifest (base-path aware); icons are `public/icon-{192,512}.png` and `app/apple-icon.png`, rendered from the Android launcher glyph.
+- The web app is an installable PWA that opens with no connection. `app/manifest.ts` is the manifest (base-path aware); icons are `public/icon-{192,512}.png` (the favicon glyph on transparent) and `app/apple-icon.png` (the same on the page background, since iOS fills transparency with black).
 - `bun export` runs `scripts/build-sw.ts` after `next build`: it writes `out/sw.js` from `scripts/sw.js`, prepending the list of built files and a version hashed from them. The worker saves every listed file on install (one missing file fails the install, so dotfiles, `.txt` and 404 pages are skipped), serves them cache-first, and answers every in-scope navigation with the saved page. Todo data offline is Firestore's persistent cache / localStorage, not the worker.
 - Updates never apply silently: a new worker waits, the undo-snackbar slot shows "New version · Reload" (when no undo is showing), and Reload tells it to take over and reloads the page. The page checks for a new version whenever it becomes visible. The worker is only registered in production builds, so `bun dev` is unaffected.
 - "Install app" sits in the account menu (`InstallRow` in `auth-menu.tsx`, state in `utils/pwa.tsx`): it opens the browser's install prompt where one exists (Chrome/Edge), shows "Tap Share, then Add to Home Screen" in iOS Safari, and is hidden otherwise or once installed. Google sign-in from an installed iOS home-screen app can fail; signing in once in Safari first works around it.
@@ -137,7 +137,7 @@ There is no `SNOOZED` state — see [Snooze is derived](#snooze-is-derived). Doc
 
 ## Deployment
 
-GitHub Pages via `.github/workflows/web.yml`. Triggers: manual (`workflow_dispatch`) or a GitHub Release being published. The workflow runs `bun export` with `NEXT_PUBLIC_BASE_PATH=/${{ github.event.repository.name }}` and uploads `web/out` as a Pages artifact.
+GitHub Pages via `.github/workflows/web.yml`. Triggers: manual (`workflow_dispatch`) or a GitHub Release being published. The workflow runs `bun export` and uploads `web/out` as a Pages artifact, served at the root of the custom domain `latr.hafa.cc` (set in the repo's Pages settings; `NEXT_PUBLIC_BASE_PATH` is only for serving from a subpath).
 
 For sign-in to work on the deployed URL, the domain must be on Firebase's Authorized Domains list (Authentication → Settings).
 

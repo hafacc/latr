@@ -2,7 +2,7 @@
 
 A todo list for things to do latr. Native Android app and Next.js web client, synced via Firestore.
 
-Live: https://hafa.cc/latr/
+Live: https://latr.hafa.cc/
 
 ## Running locally
 
