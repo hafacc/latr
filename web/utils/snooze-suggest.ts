@@ -241,7 +241,8 @@ export function extractKeys(a: Date, t: Date): string[] {
   const h = Math.round(deltaMin / 60);
 
   let offsetKeys: string[] = [];
-  if (h >= 0 && h <= 12) {
+  // An offset that crosses into the next snooze day is really a clock time there, not "N hours later".
+  if (h >= 0 && h <= 12 && sameDate(snoozeDay(base), snoozeDay(t))) {
     const offsetRules = dateRulesFor(a, base).filter((r) => isShortFamily(r));
     offsetKeys = offsetRules
       .filter((r) => !(r === "D0" && h === 0))
@@ -418,6 +419,7 @@ export function resolveKey(keyId: string, now: Date): number | null {
     const base = new Date(now);
     base.setDate(base.getDate() + numDays);
     epoch = snapTo5Min(base.getTime() + key.hours * HOUR_MS);
+    if (!sameDate(snoozeDay(new Date(epoch)), dayDate)) return null;
   } else {
     // Wall-clock minutes past 05:00, so a night time keeps its clock reading across DST.
     epoch = new Date(
@@ -452,7 +454,7 @@ export type Row = {
 
 export type LastRow = { time: number; text: string };
 
-// Lower wins: today/tomorrow, then named days (Wd/Wn/Dom/DomL), then counted ones (D/W/Mo), shorter period first.
+// Lower wins, after clock time over offset: today/tomorrow, then named days (Wd/Wn/Dom/DomL), then counted ones (D/W/Mo), shorter period first.
 function tieRank(keyId: string): number {
   const { dateRule } = parseKey(keyId);
   if (dateRule === "D0" || dateRule === "D1") return 0;
@@ -474,12 +476,12 @@ function tieRank(keyId: string): number {
 }
 
 function betterTie(a: string, b: string): boolean {
-  const ra = tieRank(a);
-  const rb = tieRank(b);
-  if (ra !== rb) return ra < rb;
   const aTimed = isTimedKey(a);
   const bTimed = isTimedKey(b);
   if (aTimed !== bTimed) return aTimed;
+  const ra = tieRank(a);
+  const rb = tieRank(b);
+  if (ra !== rb) return ra < rb;
   // Code-unit order, not localeCompare, to match Android's String.compareTo.
   return a < b;
 }
@@ -490,6 +492,17 @@ const DEFAULT_FLOOR = 0.05;
 // The platforms sum doubles in different orders, so an exact == could pick different winners.
 function sameScore(a: number, b: number): boolean {
   return Math.abs(a - b) <= SCORE_EPS * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+/** A set's keys, minus offsets whose day no clock time in the set shares: older builds saved those across midnight. */
+function liveMembers(setId: string): string[] {
+  const keys = splitSetId(setId);
+  const timedRules = new Set(
+    keys.filter(isTimedKey).map((key) => parseKey(key).dateRule),
+  );
+  return keys.filter(
+    (key) => isTimedKey(key) || timedRules.has(parseKey(key).dateRule),
+  );
 }
 
 export function rank(
@@ -503,7 +516,7 @@ export function rank(
   const setMembers = new Map<string, string[]>();
   for (const part of partitions) {
     for (const [setId, entry] of Object.entries(part.sets)) {
-      const members = setMembers.get(setId) ?? splitSetId(setId);
+      const members = setMembers.get(setId) ?? liveMembers(setId);
       setMembers.set(setId, members);
       const live = decay(entry.c, now - entry.t, classHForSet(members));
       liveSets.set(setId, (liveSets.get(setId) ?? 0) + live);
@@ -529,33 +542,40 @@ export function rank(
       }
     }
 
-    let best: { key: string; score: number; time: number } | null = null;
+    // A key that has already passed today still wins its ties, so its weight isn't handed to its offsets.
+    let best: { key: string; score: number; time: number | null } | null = null;
     for (const [key, score] of agg) {
-      const time = resolveCached(key);
-      if (time === null) continue;
       if (
         !best ||
         (sameScore(score, best.score)
           ? betterTie(key, best.key)
           : score > best.score)
       ) {
-        best = { key, score, time };
+        best = { key, score, time: resolveCached(key) };
       }
     }
     if (!best || best.score <= floor) break;
+    if (best.time === null) {
+      const passed = best.key;
+      for (const setId of Array.from(available)) {
+        if (setMembers.get(setId)?.includes(passed)) available.delete(setId);
+      }
+      continue;
+    }
+    const bestTime = best.time;
 
     const spent = new Set([best.key]);
     for (const [key] of agg) {
       const time = resolveCached(key);
-      if (time !== null && Math.abs(time - best.time) <= windowMs) {
+      if (time !== null && Math.abs(time - bestTime) <= windowMs) {
         spent.add(key);
       }
     }
 
     rows.push({
-      time: best.time,
-      text: labelParts(best.key, best.time, nowDate).text,
-      icon: rowIcon(best.key, best.time, nowDate),
+      time: bestTime,
+      text: labelParts(best.key, bestTime, nowDate).text,
+      icon: rowIcon(best.key, bestTime, nowDate),
       keyId: best.key,
       score: best.score,
     });
@@ -574,7 +594,6 @@ export function lastRow(
   partitions: DevicePartition[],
   now: number,
   rows: Row[],
-  windowMs = DEFAULT_WINDOW_MS,
 ): LastRow | null {
   let best: { target: number; at: number } | null = null;
   for (const p of partitions) {
@@ -583,8 +602,17 @@ export function lastRow(
   }
   if (!best || best.target <= now) return null;
   const target = best.target;
-  if (rows.some((r) => Math.abs(r.time - target) <= windowMs)) return null;
-  return { time: target, text: `Last · ${formatters().date.format(target)}` };
+  if (rows.some((r) => r.time === target)) return null;
+  return { time: target, text: `Last · ${lastDayText(target, new Date(now))}` };
+}
+
+/** The shortest phrase a ranked row would use for this day, else the date. */
+function lastDayText(target: number, now: Date): string {
+  const { dist } = dayPhraseOf("D1", new Date(target), now);
+  const rule = dist <= 1 ? "D1" : dist <= 14 ? "Wd1" : null;
+  return rule === null
+    ? formatters().date.format(target)
+    : labelParts(`${rule}@0000`, target, now).text;
 }
 
 export type QuickTime = {
