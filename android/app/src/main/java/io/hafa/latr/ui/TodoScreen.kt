@@ -1178,7 +1178,7 @@ fun TodoItem(
         // Restore base slop inside the row so taps/long-press aren't dulled by the swipe's inflated slop.
         CompositionLocalProvider(LocalViewConfiguration provides baseViewConfig) {
         val displaced by remember { derivedStateOf { dismissState.dismissDirection != SwipeToDismissBoxValue.Settled } }
-        val cornerRadius = animateDpAsState(if (displaced) 16.dp else 0.dp, tween(150), label = "rowCorner")
+        val cornerRadius = animateDpAsState(if (displaced) 16.dp else 0.dp, tween(300), label = "rowCorner")
         val rowColor = MaterialTheme.colorScheme.surfaceContainerLowest
         Row(
             verticalAlignment = Alignment.CenterVertically,
