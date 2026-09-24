@@ -353,7 +353,7 @@ private fun MenuRowItem(
         is MenuRow.Suggestion ->
             SnoozeSuggestions.labelText(row.row.key, row.row.epochMillis, now, zone) to
                 SnoozeSuggestions.formatClock(row.row.epochMillis, zone)
-        is MenuRow.Last -> SnoozeSuggestions.lastText(row.epochMillis, zone) to
+        is MenuRow.Last -> SnoozeSuggestions.lastText(row.epochMillis, now, zone) to
             SnoozeSuggestions.formatClock(row.epochMillis, zone)
         is MenuRow.Custom -> "Pick a date & time" to null
     }

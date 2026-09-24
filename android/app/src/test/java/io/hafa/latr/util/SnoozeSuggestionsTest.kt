@@ -11,6 +11,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 class SnoozeSuggestionsTest {
 
@@ -355,21 +356,29 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `last text is the date and its clock time is 24-hour`() {
-        val target = epoch(LocalDateTime.of(2026, 9, 24, 21, 5))
-        assertEquals("Last · Sep 24", SnoozeSuggestions.lastText(target, zone))
-        assertEquals("21:05", SnoozeSuggestions.formatClock(target, zone))
+    fun `last is named like a ranked row, with the date only when no phrase fits`() {
+        val now = instant(LocalDateTime.of(2024, 3, 4, 10, 0)) // a Monday
+        fun text(target: LocalDateTime) = SnoozeSuggestions.lastText(epoch(target), now, zone)
+        assertEquals("Last · This evening", text(LocalDateTime.of(2024, 3, 4, 20, 0)))
+        assertEquals("Last · Tomorrow morning", text(LocalDateTime.of(2024, 3, 5, 8, 0)))
+        assertEquals("Last · This Friday afternoon", text(LocalDateTime.of(2024, 3, 8, 14, 0)))
+        assertEquals("Last · Next Tuesday morning", text(LocalDateTime.of(2024, 3, 12, 8, 0)))
+        assertEquals("Last · Monday in 2 weeks", text(LocalDateTime.of(2024, 3, 18, 8, 0)))
+        assertEquals("Last · Mar 20", text(LocalDateTime.of(2024, 3, 20, 14, 0)))
+        assertEquals("21:05", SnoozeSuggestions.formatClock(epoch(LocalDateTime.of(2026, 9, 24, 21, 5)), zone))
     }
 
     @Test
-    fun `the Last row hides when past, near a ranked row, or superseded`() {
+    fun `the Last row hides when past, at a ranked row's exact time, or superseded`() {
         val now = instant(LocalDateTime.of(2026, 9, 21, 12, 0))
         val future = epoch(LocalDateTime.of(2026, 9, 25, 9, 0))
         val older = SnoozeStatsSnapshot(lastCustom = LastCustom(epoch(LocalDateTime.of(2026, 9, 26, 9, 0)), 1L))
         val newer = SnoozeStatsSnapshot(lastCustom = LastCustom(future, 2L))
         assertEquals(future, SnoozeSuggestions.lastRow(listOf(older, newer), now, emptyList()))
+        val same = SnoozeRow(future, "x", 1.0, "D4@0900")
+        assertNull(SnoozeSuggestions.lastRow(listOf(newer), now, listOf(same)))
         val near = SnoozeRow(future + 20 * 60 * 1000L, "x", 1.0, "D4@0920")
-        assertNull(SnoozeSuggestions.lastRow(listOf(newer), now, listOf(near)))
+        assertEquals(future, SnoozeSuggestions.lastRow(listOf(newer), now, listOf(near)))
         val past = SnoozeStatsSnapshot(lastCustom = LastCustom(epoch(LocalDateTime.of(2026, 9, 20, 9, 0)), 3L))
         assertNull(SnoozeSuggestions.lastRow(listOf(past), now, emptyList()))
     }
@@ -475,5 +484,59 @@ class SnoozeSuggestionsTest {
         }
         assertEquals("In a little while", SnoozeSuggestions.labelText("D0_h3", epoch(cases[0].second), instant(noon), zone))
         assertEquals("Tomorrow morning", SnoozeSuggestions.labelText("D1@0900", epoch(cases[2].second), instant(noon), zone))
+    }
+
+    private fun snoozeDayOf(dt: LocalDateTime): LocalDate = dt.minusHours(5).toLocalDate()
+
+    // Written out independently of the label code: days counted from today's calendar date to the target's 05:00 day.
+    private fun expectedLabel(target: LocalDateTime, now: LocalDateTime, key: String): String {
+        val region = when (target.hour) {
+            in 5..11 -> "morning"
+            in 12..16 -> "afternoon"
+            in 17..20 -> "evening"
+            else -> "night"
+        }
+        val day = snoozeDayOf(target)
+        val days = ChronoUnit.DAYS.between(now.toLocalDate(), day)
+        val weekday = day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US)
+        val text = when {
+            days <= 0 -> if (region == "night") "Tonight" else "This $region"
+            days == 1L && !Regex("^(Wd|Wn)").containsMatchIn(key) -> "Tomorrow $region"
+            days <= 6 -> "This $weekday $region"
+            days <= 13 -> "Next $weekday $region"
+            else -> "$weekday in 2 weeks"
+        }
+        return "$text, %02d:%02d".format(target.hour, target.minute)
+    }
+
+    @Test
+    fun `a single snooze is suggested back as that exact time, by its best name`() {
+        val clockTimes = listOf(LocalTime.of(0, 30), LocalTime.of(3, 0), LocalTime.of(7, 0), LocalTime.of(8, 0),
+            LocalTime.of(12, 15), LocalTime.of(17, 0), LocalTime.of(20, 0), LocalTime.of(22, 45))
+        val failures = mutableListOf<String>()
+        // A September week, and the week the clocks fall back.
+        for (start in listOf(LocalDateTime.of(2026, 9, 21, 0, 0), LocalDateTime.of(2026, 10, 29, 0, 0))) {
+            for (step in 0 until 8 * 16) {
+                val commitAt = start.plusMinutes(step * 90L)
+                val now = epoch(commitAt) + 60_000L
+                for (days in 0L..14L) {
+                    for (clock in clockTimes) {
+                        val target = LocalDateTime.of(commitAt.toLocalDate().plusDays(days), clock)
+                        val dist = ChronoUnit.DAYS.between(snoozeDayOf(commitAt), snoozeDayOf(target))
+                        if (epoch(target) <= now + 5 * 60_000L || dist > 14) continue
+                        val next = commitOnce(SnoozeStatsSnapshot(), commitAt, target).next
+                        val top = SnoozeSuggestions.rank(listOf(next), Instant.ofEpochMilli(now), zone).firstOrNull()
+                        val named = dist < 2 || Regex("^(Wd|Wn)\\d").containsMatchIn(top?.key ?: "")
+                        val want = expectedLabel(target, atZone(now), top?.key ?: "")
+                        if (top == null || !SnoozeSuggestions.isTimedKey(top.key) || top.epochMillis != epoch(target) || !named ||
+                            top.label != want
+                        ) {
+                            failures += "$commitAt -> $target: ${top?.key} ${top?.label} (want $want)"
+                        }
+                    }
+                }
+            }
+        }
+        assertEquals(emptyList<String>(), failures.take(10))
     }
 }

@@ -44,22 +44,22 @@
       "name": "post-midnight commit counts as the previous snooze day",
       "at": "2026-09-23T00:30:00",
       "target": "2026-09-23T08:30:00",
-      "keys": ["D0_h8", "D1@0830", "Wd3@0830"],
-      "setId": "D0_h8__D1@0830__Wd3@0830"
+      "keys": ["D1@0830", "Wd3@0830"],
+      "setId": "D1@0830__Wd3@0830"
     },
     {
-      "name": "offset Wd from 00:30: Wed 00:30 to Fri 08:30",
-      "at": "2026-09-23T00:30:00",
-      "target": "2026-09-25T08:30:00",
-      "keys": ["D2_h8", "D3@0830", "Wd4_h8", "Wd5@0830"],
-      "setId": "D2_h8__D3@0830__Wd4_h8__Wd5@0830"
+      "name": "an offset crossing into the next snooze day isn't learned: Wed 22:54 to Fri 08:00",
+      "at": "2026-09-23T22:54:00",
+      "target": "2026-09-25T08:00:00",
+      "keys": ["D2@0800", "Wd5@0800"],
+      "setId": "D2@0800__Wd5@0800"
     },
     {
       "name": "the 05:00 day boundary is wall-clock on the spring-forward morning",
       "at": "2026-03-07T22:00:00",
       "target": "2026-03-08T05:30:00",
-      "keys": ["D0_h7", "D1@0530", "Wd7@0530"],
-      "setId": "D0_h7__D1@0530__Wd7@0530"
+      "keys": ["D1@0530", "Wd7@0530"],
+      "setId": "D1@0530__Wd7@0530"
     },
     {
       "name": "45-day custom pick matches no pattern",
@@ -202,10 +202,10 @@
       "epochLocal": "2026-03-08T10:00:00"
     },
     {
-      "name": "offset Wd4_h8 from Wed 00:30 lands Fri 08:30",
+      "name": "an offset that would land on the next snooze day doesn't resolve",
       "now": "2026-09-23T00:30:00",
       "key": "Wd4_h8",
-      "epochLocal": "2026-09-25T08:30:00"
+      "epochLocal": null
     },
     {
       "name": "this morning already passed",
@@ -279,9 +279,9 @@
     },
     {
       "name": "offset Wd names the resolved day's weekday",
-      "now": "2026-09-23T00:30:00",
-      "key": "Wd4_h8",
-      "resolvedLocal": "2026-09-25T08:30:00",
+      "now": "2026-09-23T10:00:00",
+      "key": "Wd5_h3",
+      "resolvedLocal": "2026-09-25T13:00:00",
       "family": "Wd",
       "dist": 2,
       "weekday": 5,
@@ -538,6 +538,50 @@
         }
       ],
       "expectKeys": ["D0_h3"]
+    },
+    {
+      "name": "a clock time that has passed still wins its ties, so its offsets don't show",
+      "now": "2026-09-24T15:00:00",
+      "partitions": [
+        {
+          "sets": {
+            "D0@1300__D0_h3": { "c": 1, "t": 1790172000000 },
+            "D0@1300__D0_h2": { "c": 1, "t": 1790175600000 },
+            "D0@1700__D0_h6": { "c": 1, "t": 1790175600000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@1700"]
+    },
+    {
+      "name": "offsets older builds saved across midnight are ignored",
+      "now": "2026-09-23T23:55:00",
+      "partitions": [
+        {
+          "sets": {
+            "D1_h9__D2@0800__Wd4_h9__Wd5@0800": { "c": 3, "t": 1790218440000 },
+            "D0@2000__D0_h11": { "c": 1, "t": 1790167500000 },
+            "D0_h11__D1@0800__Wd4@0800": { "c": 1, "t": 1790123760000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D1@0800", "Wd5@0800"]
+    },
+    {
+      "name": "a clock time beats an hour offset in a tie, even tomorrow's",
+      "now": "2026-09-23T10:00:00",
+      "partitions": [
+        {
+          "sets": { "D1_h2__Wd5@0900": { "c": 3, "t": 1790172000000 } },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["Wd5@0900"]
     },
     {
       "name": "near-equal float sums tie, and tomorrow wins",
