@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import type { ReactElement, ReactNode } from "react";
 import ThemeProvider from "../components/theme";
 import { ModifierProvider } from "../utils/kbd-modifier";
+import { PwaProvider } from "../utils/pwa";
 import { TodoProvider } from "../utils/store";
 import "./globals.css";
 
@@ -32,7 +33,9 @@ export default function RootLayout({
       <body>
         <ThemeProvider>
           <TodoProvider>
-            <ModifierProvider>{children}</ModifierProvider>
+            <ModifierProvider>
+              <PwaProvider>{children}</PwaProvider>
+            </ModifierProvider>
           </TodoProvider>
         </ThemeProvider>
       </body>

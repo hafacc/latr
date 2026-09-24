@@ -13,6 +13,7 @@ import {
 } from "react";
 import {
   LuChevronsUpDown,
+  LuDownload,
   LuLogOut,
   LuMonitor,
   LuMoon,
@@ -21,6 +22,7 @@ import {
   LuUser,
 } from "react-icons/lu";
 import { auth, firebaseConfigured } from "../utils/firebase";
+import { usePwa } from "../utils/pwa";
 import { useTodos } from "../utils/store";
 import Sheet from "./sheet";
 import { type ThemeMode, useTheme } from "./theme";
@@ -250,6 +252,32 @@ function ConfirmDelete({
   );
 }
 
+function InstallRow(): ReactElement | null {
+  const { install, promptInstall } = usePwa();
+  const [showSteps, setShowSteps] = useState(false);
+  if (install === null) return null;
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        onClick={() =>
+          install === "prompt" ? promptInstall() : setShowSteps((v) => !v)
+        }
+        aria-expanded={install === "ios" ? showSteps : undefined}
+        className="flex items-center gap-2.5 h-10 px-2 rounded-[10px] text-sm text-text hover:bg-surface-hover transition-colors"
+      >
+        <LuDownload className="w-4 h-4 text-text-secondary" />
+        Install app
+      </button>
+      {showSteps && (
+        <p className="m-0 px-2 pb-1 text-xs text-text-secondary">
+          Tap Share, then Add to Home Screen.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Account details, theme and sign-in/out; shared by the desktop popover and the phone sheet. */
 function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
   const { user, signIn, signOut, deleteAccount } = useAuth();
@@ -278,6 +306,7 @@ function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
         </div>
       )}
       <ThemeSegmented />
+      <InstallRow />
       {user ? (
         <div className="flex flex-col">
           <button
