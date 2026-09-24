@@ -1,4 +1,4 @@
-// Served by GitHub Pages for github.com/hafacc/latr at hafa.cc/latr; the deploy workflow sets the base path.
+// Served by GitHub Pages at latr.hafa.cc, the domain root; set NEXT_PUBLIC_BASE_PATH to serve from a subpath.
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export default {
