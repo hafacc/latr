@@ -2,12 +2,41 @@
 
 import type { ReactElement } from "react";
 import { isMacPlatform } from "../utils/kbd-modifier";
+import { usePwa } from "../utils/pwa";
 import { UNDO_MS, useTodos } from "../utils/store";
+
+const SNACKBAR = `
+        fixed z-30 left-1/2 -translate-x-1/2
+        bottom-[calc(env(safe-area-inset-bottom)+88px)] md:bottom-7
+        md:left-[calc(50%+var(--sidebar-reserved)/2)]
+        flex flex-col overflow-hidden rounded-full
+        bg-inverse text-on-inverse shadow-dock animate-rise
+`;
 
 export default function UndoSnackbar(): ReactElement | null {
   const { lastUndo, undoExpiresAt, undo } = useTodos();
+  const { updateReady, applyUpdate } = usePwa();
 
-  if (!lastUndo || !undoExpiresAt) return null;
+  if (!lastUndo || !undoExpiresAt) {
+    if (updateReady) {
+      return (
+        <div role="status" className={SNACKBAR}>
+          <div className="flex items-center gap-3.5 h-10 pl-[18px] pr-2 text-[13.5px]">
+            <span>New version</span>
+            <button
+              type="button"
+              onClick={applyUpdate}
+              className="px-2 py-1.5 rounded-full font-semibold text-inverse-accent hover:bg-inverse-hover"
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    } else {
+      return null;
+    }
+  }
 
   let label: string;
   if (lastUndo.kind === "snooze") label = "Snoozed";
@@ -16,16 +45,7 @@ export default function UndoSnackbar(): ReactElement | null {
   else label = `Deleted ${lastUndo.todos.length} todos`;
 
   return (
-    <div
-      role="status"
-      className="
-        fixed z-30 left-1/2 -translate-x-1/2
-        bottom-[calc(env(safe-area-inset-bottom)+88px)] md:bottom-7
-        md:left-[calc(50%+var(--sidebar-reserved)/2)]
-        flex flex-col overflow-hidden rounded-full
-        bg-inverse text-on-inverse shadow-dock animate-rise
-      "
-    >
+    <div role="status" className={SNACKBAR}>
       <div className="flex items-center gap-3.5 h-10 pl-[18px] pr-2 text-[13.5px]">
         <span>{label}</span>
         <button

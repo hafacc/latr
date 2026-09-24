@@ -6,6 +6,7 @@
       "app/**/*.{ts,tsx}",
       "components/**/*.{ts,tsx}",
       "utils/**/*.{ts,tsx}",
+      "scripts/**/*.{js,ts}",
       "*.{json,js,ts}"
     ],
     "ignoreUnknown": false
