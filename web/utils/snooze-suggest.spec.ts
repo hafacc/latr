@@ -9,6 +9,7 @@ import {
   dayPhraseOf,
   emptyPartition,
   extractKeys,
+  isTimedKey,
   labelFor,
   labelParts,
   lastRow,
@@ -624,31 +625,38 @@ describe("quick times", () => {
 });
 
 describe("lastRow", () => {
-  test("shown only when in the future and not already covered by a displayed row", () => {
-    const now = at(2024, 3, 4, 10, 0).getTime();
-    const future = at(2024, 3, 20, 14, 0).getTime();
-    const p = {
-      ...emptyPartition("a"),
-      lastCustom: { target: future, at: now },
-    };
-    expect(lastRow([p], now, [])).not.toBeNull();
+  const now = at(2024, 3, 4, 10, 0).getTime(); // a Monday
+  const withLast = (target: number) => ({
+    ...emptyPartition("a"),
+    lastCustom: { target, at: now },
+  });
 
-    const covering = [
+  test("hidden when past or when a ranked row lands at exactly its time", () => {
+    const future = at(2024, 3, 20, 14, 0).getTime();
+    const covering: Row[] = [
       {
         time: future,
         text: "x",
-        icon: "days" as const,
+        icon: "days",
         keyId: "k",
         score: 1,
       },
     ];
-    expect(lastRow([p], now, covering)).toBeNull();
+    expect(lastRow([withLast(future)], now, covering)).toBeNull();
+    const near: Row[] = [{ ...covering[0], time: future + 20 * MINUTE }];
+    expect(lastRow([withLast(future)], now, near)?.time).toBe(future);
+    expect(lastRow([withLast(now - 1000)], now, [])).toBeNull();
+  });
 
-    const past = {
-      ...emptyPartition("a"),
-      lastCustom: { target: now - 1000, at: now },
-    };
-    expect(lastRow([past], now, [])).toBeNull();
+  test("named like a ranked row, with the date only when no phrase fits", () => {
+    const text = (target: Date) =>
+      lastRow([withLast(target.getTime())], now, [])?.text;
+    expect(text(at(2024, 3, 4, 20, 0))).toBe("Last · This evening");
+    expect(text(at(2024, 3, 5, 8, 0))).toBe("Last · Tomorrow morning");
+    expect(text(at(2024, 3, 8, 14, 0))).toBe("Last · This Friday afternoon");
+    expect(text(at(2024, 3, 12, 8, 0))).toBe("Last · Next Tuesday morning");
+    expect(text(at(2024, 3, 18, 8, 0))).toBe("Last · Monday in 2 weeks");
+    expect(text(at(2024, 3, 20, 14, 0))).toBe("Last · Mar 20");
   });
 });
 
@@ -742,4 +750,116 @@ describe("row icons and label parts (mirror Android rowIcon)", () => {
     expect(labelParts("D0_h3", soon, noon).text).toBe("In a little while");
     expect(labelFor("D0_h3", soon, noon)).toBe("In a little while (15:00)");
   });
+});
+
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+
+function snoozeDayOf(d: Date): number {
+  const shifted = new Date(d);
+  shifted.setHours(shifted.getHours() - 5);
+  shifted.setHours(0, 0, 0, 0);
+  return shifted.getTime();
+}
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+// Written out independently of the label code: days counted from today's calendar date to the target's 05:00 day.
+function expectedLabel(target: Date, now: Date, keyId: string): string {
+  const hour = target.getHours();
+  const region =
+    hour >= 5 && hour < 12
+      ? "morning"
+      : hour >= 12 && hour < 17
+        ? "afternoon"
+        : hour >= 17 && hour < 21
+          ? "evening"
+          : "night";
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((snoozeDayOf(target) - today.getTime()) / DAY);
+  const weekday = WEEKDAYS[new Date(snoozeDayOf(target)).getDay()];
+  const clock = `${String(hour).padStart(2, "0")}:${String(target.getMinutes()).padStart(2, "0")}`;
+  let text: string;
+  if (days <= 0) {
+    text = region === "night" ? "Tonight" : `This ${region}`;
+  } else if (days === 1 && !/^(Wd|Wn)/.test(keyId)) {
+    text = `Tomorrow ${region}`;
+  } else if (days <= 6) {
+    text = `This ${weekday} ${region}`;
+  } else if (days <= 13) {
+    text = `Next ${weekday} ${region}`;
+  } else {
+    text = `${weekday} in 2 weeks`;
+  }
+  return `${text}, ${clock}`;
+}
+
+describe("a single snooze is suggested back as that exact time, by its best name", () => {
+  const clockTimes = [
+    [0, 30],
+    [3, 0],
+    [7, 0],
+    [8, 0],
+    [12, 15],
+    [17, 0],
+    [20, 0],
+    [22, 45],
+  ];
+  // A September week, and the week the clocks fall back.
+  for (const [year, month, day] of [
+    [2026, 9, 21],
+    [2026, 10, 29],
+  ]) {
+    test(`sweep from ${year}-${month}-${day}`, () => {
+      const failures: string[] = [];
+      for (let step = 0; step < 8 * 16; step++) {
+        const commitAt = at(year, month, day, 0, step * 90);
+        const now = commitAt.getTime() + MINUTE;
+        for (let days = 0; days <= 14; days++) {
+          for (const [hour, minute] of clockTimes) {
+            const target = new Date(commitAt);
+            target.setDate(target.getDate() + days);
+            target.setHours(hour, minute, 0, 0);
+            const dist = Math.round(
+              (snoozeDayOf(target) - snoozeDayOf(commitAt)) / DAY,
+            );
+            if (target.getTime() <= now + 5 * MINUTE || dist > 14) continue;
+            const { next } = commit(
+              emptyPartition("a"),
+              commitAt.getTime(),
+              target.getTime(),
+              "custom",
+            );
+            const top = rank([next], now)[0];
+            const named =
+              dist >= 2 ? /^(Wd|Wn)\d/.test(top?.keyId ?? "") : true;
+            const text = top
+              ? labelFor(top.keyId, top.time, new Date(now))
+              : "";
+            if (
+              !top ||
+              !isTimedKey(top.keyId) ||
+              top.time !== target.getTime() ||
+              !named ||
+              text !== expectedLabel(target, new Date(now), top?.keyId ?? "")
+            ) {
+              failures.push(
+                `${commitAt.toString().slice(0, 21)} -> ${target.toString().slice(0, 21)}: ${top?.keyId} ${text} (want ${expectedLabel(target, new Date(now), top?.keyId ?? "")})`,
+              );
+            }
+          }
+        }
+      }
+      expect(failures.slice(0, 10)).toEqual([]);
+    });
+  }
 });

@@ -115,7 +115,8 @@ object SnoozeSuggestions {
         val base = aZoned.plusDays(dEff)
         val deltaMin = Math.round((target.toEpochMilli() - base.toInstant().toEpochMilli()) / 60000.0)
         val h = Math.round(deltaMin / 60.0)
-        if (h < 0 || h > 12) return emptySet()
+        // An offset that crosses into the next snooze day is really a clock time there, not "N hours later".
+        if (h < 0 || h > 12 || snoozeDay(base.toLocalDateTime()) != snoozeDay(tLocal)) return emptySet()
         val rules = dateRulesFor(snoozeDay(aLocal), snoozeDay(base.toLocalDateTime()))
             .filter { isShortFamily(it) }
         return rules.mapNotNull { r -> if (r == "D0" && h == 0L) null else "${r}_h$h" }.toSet()
@@ -193,6 +194,13 @@ object SnoozeSuggestions {
     fun setId(keys: Set<PatternKey>): String = keys.sorted().joinToString("__")
 
     private fun splitSetId(id: String): Set<PatternKey> = id.split("__").toSet()
+
+    /** A set's keys, minus offsets whose day no clock time in the set shares: older builds saved those across midnight. */
+    private fun liveMembers(id: String): Set<PatternKey> {
+        val keys = splitSetId(id)
+        val timedRules = keys.filter { isTimedKey(it) }.map { dateRuleOf(it) }.toSet()
+        return keys.filter { isTimedKey(it) || dateRuleOf(it) in timedRules }.toSet()
+    }
 
     private fun decayFactor(ageMs: Long, halfLifeDays: Long): Double =
         2.0.pow(-(ageMs / MS_PER_DAY) / halfLifeDays)
@@ -286,7 +294,7 @@ object SnoozeSuggestions {
                 val live = s.c * decayFactor(nowMillis - s.t, setH(id))
                 if (live <= 0.0) continue
                 liveById[id] = (liveById[id] ?: 0.0) + live
-                membersById.getOrPut(id) { splitSetId(id) }
+                membersById.getOrPut(id) { liveMembers(id) }
             }
         }
         val available = liveById.keys.toMutableSet()
@@ -300,9 +308,10 @@ object SnoozeSuggestions {
         val rows = mutableListOf<SnoozeRow>()
         val settled = mutableSetOf<PatternKey>()
         while (rows.size < n) {
+            // A key that has already passed today still wins its ties, so its weight isn't handed to its offsets.
             var best: PatternKey? = null
             var bestScore = 0.0
-            for (key in resolved.keys) {
+            for (key in candidateKeys) {
                 if (key in settled) continue
                 val agg = available.filter { key in membersById.getValue(it) }.sumOf { liveById.getValue(it) }
                 if (agg <= 0.0) continue
@@ -314,7 +323,12 @@ object SnoozeSuggestions {
             }
             if (best == null || bestScore <= floor) break
             val pickedKey = best
-            val pickedTime = resolved.getValue(pickedKey)
+            val pickedTime = resolved[pickedKey]
+            if (pickedTime == null) {
+                settled += pickedKey
+                available -= available.filter { pickedKey in membersById.getValue(it) }.toSet()
+                continue
+            }
             val absorbed = resolved.keys.filter {
                 it != pickedKey && it !in settled && Math.abs(resolved.getValue(it) - pickedTime) <= WINDOW_MS
             }
@@ -332,15 +346,15 @@ object SnoozeSuggestions {
     fun latestLastCustom(partitions: List<SnoozeStatsSnapshot>): LastCustom? =
         partitions.mapNotNull { it.lastCustom }.maxByOrNull { it.at }
 
-    /** The "Last" row's target: the newest custom pick, if it's still ahead and no ranked row already covers it. */
+    /** The "Last" row's target: the newest custom pick, if it's still ahead and no ranked row lands at exactly that time. */
     fun lastRow(partitions: List<SnoozeStatsSnapshot>, now: Instant, rows: List<SnoozeRow>): Long? {
         val last = latestLastCustom(partitions) ?: return null
         if (last.target <= now.toEpochMilli()) return null
-        if (rows.any { Math.abs(it.epochMillis - last.target) <= WINDOW_MS }) return null
+        if (rows.any { it.epochMillis == last.target }) return null
         return last.target
     }
 
-    // On a tie, lower wins: a named weekday/day of month beats a count of days/weeks/months.
+    // On a tie, after clock time over offset, lower wins: today/tomorrow, then a named weekday/day of month, then a count of days/weeks/months.
     private fun tieRank(dateRule: String): Int = when {
         dateRule == "D0" || dateRule == "D1" -> 0
         WD_RE.matches(dateRule) -> 1
@@ -357,12 +371,12 @@ object SnoozeSuggestions {
 
     /** Negative if [a] should be preferred over [b] when their aggregate scores tie. */
     private fun tieBreak(a: PatternKey, b: PatternKey): Int {
-        val ra = tieRank(dateRuleOf(a))
-        val rb = tieRank(dateRuleOf(b))
-        if (ra != rb) return ra - rb
         val oa = if (isTimedKey(a)) 0 else 1
         val ob = if (isTimedKey(b)) 0 else 1
         if (oa != ob) return oa - ob
+        val ra = tieRank(dateRuleOf(a))
+        val rb = tieRank(dateRuleOf(b))
+        if (ra != rb) return ra - rb
         return a.compareTo(b) // code-unit order; must match web's `a < b`, not localeCompare
     }
 
@@ -381,7 +395,8 @@ object SnoozeSuggestions {
             val numDays = ChronoUnit.DAYS.between(sd, date)
             // Wall-clock days, then elapsed hours (ZonedDateTime.plusHours), matching extraction.
             val zoned = now.atZone(zone).plusDays(numDays).plusHours(h.toLong())
-            snapTo5Min(zoned.toInstant().toEpochMilli())
+            val epoch = snapTo5Min(zoned.toInstant().toEpochMilli())
+            if (snoozeDay(LocalDateTime.ofInstant(Instant.ofEpochMilli(epoch), zone)) != date) null else epoch
         } else {
             val date = resolveDateRule(dateRule, snoozeDay(nowLocal)) ?: return null
             val sinceBoundary = (slotClockMinutes(key.substringAfter('@')) - DAY_BOUNDARY_HOUR.toInt() * 60 + 24 * 60) % (24 * 60)
@@ -565,10 +580,21 @@ object SnoozeSuggestions {
     fun labelText(key: PatternKey, resolvedEpoch: Long, now: Instant, zone: ZoneId): String =
         labelParts(key, resolvedEpoch, now, zone).text
 
-    fun lastText(target: Long, zone: ZoneId): String {
-        val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(target), zone)
-        val month = dt.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        return "Last · $month ${dt.dayOfMonth}"
+    /** The shortest phrase a ranked row would use for this day, else the date. */
+    fun lastText(target: Long, now: Instant, zone: ZoneId): String {
+        val dist = labelDist(target, now, zone)
+        val rule = when {
+            dist <= 1 -> "D1"
+            dist <= 14 -> "Wd1"
+            else -> null
+        }
+        val text = if (rule != null) {
+            labelText("$rule@0000", target, now, zone)
+        } else {
+            val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(target), zone)
+            "${dt.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())} ${dt.dayOfMonth}"
+        }
+        return "Last · $text"
     }
 
 
