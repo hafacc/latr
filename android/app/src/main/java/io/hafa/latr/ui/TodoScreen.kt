@@ -1051,6 +1051,17 @@ fun TodoItem(
     // The row swipe reads this inflated slop; base is restored inside the row for taps/text.
     val baseViewConfig = LocalViewConfiguration.current
     val swipeViewConfig = remember(baseViewConfig) { inflatedSlop(baseViewConfig) }
+    val swipeDirection by remember { derivedStateOf { dismissState.dismissDirection } }
+    val cornerRadius = animateDpAsState(
+        if (swipeDirection != SwipeToDismissBoxValue.Settled) 16.dp else 0.dp,
+        tween(300),
+        label = "rowCorner",
+    )
+    // Kept after the row settles so the swipe color stays under the corners while they square off.
+    var lastSwipeDirection by remember { mutableStateOf(SwipeToDismissBoxValue.Settled) }
+    LaunchedEffect(swipeDirection) {
+        if (swipeDirection != SwipeToDismissBoxValue.Settled) lastSwipeDirection = swipeDirection
+    }
 
     // Programmatic focus (new todo, scroll-to-focus): open the editor, caret at end.
     // !editing so it never clobbers a tap-opened editor's caret with end.
@@ -1114,8 +1125,12 @@ fun TodoItem(
             scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
         },
         backgroundContent = {
-            val direction by remember { derivedStateOf { dismissState.dismissDirection } }
-            if (direction != SwipeToDismissBoxValue.Settled) {
+            val direction =
+                if (swipeDirection != SwipeToDismissBoxValue.Settled) swipeDirection else lastSwipeDirection
+            val rounded = cornerRadius.value > 0.dp
+            if (direction != SwipeToDismissBoxValue.Settled &&
+                (swipeDirection != SwipeToDismissBoxValue.Settled || rounded)
+            ) {
                 val colorScheme = MaterialTheme.colorScheme
                 val done = todo.state == TodoState.DONE
                 val look = when (direction) {
@@ -1177,8 +1192,6 @@ fun TodoItem(
     ) {
         // Restore base slop inside the row so taps/long-press aren't dulled by the swipe's inflated slop.
         CompositionLocalProvider(LocalViewConfiguration provides baseViewConfig) {
-        val displaced by remember { derivedStateOf { dismissState.dismissDirection != SwipeToDismissBoxValue.Settled } }
-        val cornerRadius = animateDpAsState(if (displaced) 16.dp else 0.dp, tween(300), label = "rowCorner")
         val rowColor = MaterialTheme.colorScheme.surfaceContainerLowest
         Row(
             verticalAlignment = Alignment.CenterVertically,
