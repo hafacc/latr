@@ -10,7 +10,7 @@ const SCORE_EPS = 1e-9;
 const LITTLE_WHILE_MAX_HOURS = 3;
 
 export const KEY_RE =
-  /^(D[0-6]|W[1-4]|Wd[1-7]|Wn[1-7]|Dom1|Dom15|DomL|Mo[1-3])(@([01]\d|2[0-3])[0-5][05]|_h([0-9]|1[0-2]))$/;
+  /^(D(0|[1-9]\d*)|W[1-4]|Wd[1-7]|Wn[1-7]|Dom1|Dom15|DomL|Mo[1-3])(@([01]\d|2[0-3])[0-5][05]|_h([0-9]|1[0-2]))$/;
 export const SLOT_RE = /^([01]\d|2[0-3])[0-5][05]$/;
 
 export type SnoozeSource = "suggestion" | "last" | "custom";
@@ -170,7 +170,7 @@ function dateRulesFor(a: Date, t: Date): string[] {
   const d = Math.round((st.getTime() - sa.getTime()) / DAY_MS);
   if (d < 0) return [];
   const rules: string[] = [];
-  if (d <= 6) rules.push(`D${d}`);
+  rules.push(`D${d}`);
   if (d === 7 || d === 14 || d === 21 || d === 28) rules.push(`W${d / 7}`);
   const dow = isoDow(st);
   if (d >= 1 && d <= 7) rules.push(`Wd${dow}`);
@@ -486,7 +486,6 @@ function betterTie(a: string, b: string): boolean {
   return a < b;
 }
 
-const DEFAULT_WINDOW_MS = 30 * MINUTE_MS;
 const DEFAULT_FLOOR = 0.05;
 
 // The platforms sum doubles in different orders, so an exact == could pick different winners.
@@ -510,7 +509,6 @@ export function rank(
   now: number,
   n = 5,
   floor = DEFAULT_FLOOR,
-  windowMs = DEFAULT_WINDOW_MS,
 ): Row[] {
   const liveSets = new Map<string, number>();
   const setMembers = new Map<string, string[]>();
@@ -567,7 +565,7 @@ export function rank(
     const spent = new Set([best.key]);
     for (const [key] of agg) {
       const time = resolveCached(key);
-      if (time !== null && Math.abs(time - bestTime) <= windowMs) {
+      if (time === bestTime) {
         spent.add(key);
       }
     }
@@ -621,12 +619,7 @@ export type QuickTime = {
   weight: number;
 };
 
-function clockDistance(a: number, b: number): number {
-  const d = Math.abs(a - b);
-  return Math.min(d, 1440 - d);
-}
-
-/** Up to four learned clock times at least 30 minutes apart, strongest first, returned in clock order. */
+/** Up to four learned clock times, strongest first, returned in clock order. */
 export function quickTimes(
   partitions: DevicePartition[],
   now: number,
@@ -641,7 +634,6 @@ export function quickTimes(
     }
   }
   const sinceDayStart = (clock: number) => (clock - 300 + 1440) % 1440;
-  const windowMinutes = DEFAULT_WINDOW_MS / MINUTE_MS;
   const out: QuickTime[] = [];
   while (out.length < QUICK_TIMES_MAX) {
     let best: QuickTime | null = null;
@@ -657,11 +649,7 @@ export function quickTimes(
     }
     if (!best || best.weight <= floor) break;
     out.push(best);
-    for (const clock of Array.from(weights.keys())) {
-      if (clockDistance(clock, best.clockMinutes) <= windowMinutes) {
-        weights.delete(clock);
-      }
-    }
+    weights.delete(best.clockMinutes);
   }
   return out.sort((x, y) => x.clockMinutes - y.clockMinutes);
 }
@@ -764,6 +752,8 @@ export function dayPhraseOf(
     else if (dist <= 13) phrase = "next";
     else phrase = "inTwoWeeks";
   } else if (dist === 1) phrase = "tomorrow";
+  else if (dist <= 6) phrase = "this";
+  else if (dist <= 13) phrase = "next";
   else if (dist % 7 === 0 && dist <= 28) phrase = "inWeeks";
   else phrase = "inDays";
   return { phrase, dist, weekday };
@@ -873,7 +863,8 @@ export function rowIcon(
       ? "todayDay"
       : "todayNight";
   } else if (dist === 1) return "tomorrow";
-  else if (fam === "D" || fam === "W") return "days";
-  else if (fam === "Wd" || fam === "Wn") return "weekday";
+  else if ((fam === "D" || fam === "W") && dist >= 14) return "days";
+  else if (fam === "Wd" || fam === "Wn" || fam === "D" || fam === "W")
+    return "weekday";
   else return "monthly";
 }
