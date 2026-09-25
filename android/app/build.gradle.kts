@@ -13,7 +13,7 @@ if (file("google-services.json").exists()) {
 
 android {
     namespace = "io.hafa.latr"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.hafa.latr"
