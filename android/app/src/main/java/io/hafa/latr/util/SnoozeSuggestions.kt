@@ -54,13 +54,11 @@ object SnoozeSuggestions {
     const val SLOT_MINUTES = 5
     private const val DAY_BOUNDARY_HOUR = 5L
     const val DEFAULT_FLOOR = 0.05
-    private const val WINDOW_MS = 30 * 60 * 1000L
-    private const val WINDOW_MINUTES = 30
     private const val QUICK_TIMES_MAX = 4
     private const val SCORE_EPS = 1e-9
     private const val LITTLE_WHILE_MAX_HOURS = 3
 
-    val KEY_RE = Regex("^(D[0-6]|W[1-4]|Wd[1-7]|Wn[1-7]|Dom1|Dom15|DomL|Mo[1-3])(@([01]\\d|2[0-3])[0-5][05]|_h([0-9]|1[0-2]))$")
+    val KEY_RE = Regex("^(D(0|[1-9]\\d*)|W[1-4]|Wd[1-7]|Wn[1-7]|Dom1|Dom15|DomL|Mo[1-3])(@([01]\\d|2[0-3])[0-5][05]|_h([0-9]|1[0-2]))$")
     val SLOT_RE = Regex("^([01]\\d|2[0-3])[0-5][05]$")
 
     /** The first :00/:15/:30/:45 strictly after [time]; wraps past midnight. */
@@ -76,7 +74,7 @@ object SnoozeSuggestions {
 
     fun isValidSetId(id: String): Boolean = id.split("__").all { KEY_RE.matches(it) }
 
-    private val D_RE = Regex("^D([0-6])$")
+    private val D_RE = Regex("^D(0|[1-9]\\d*)$")
     private val W_RE = Regex("^W([1-4])$")
     private val WD_RE = Regex("^Wd([1-7])$")
     private val WN_RE = Regex("^Wn([1-7])$")
@@ -128,8 +126,9 @@ object SnoozeSuggestions {
     /** Every date-rule id [toDay] satisfies relative to [fromDay] (0-4 of them). */
     private fun dateRulesFor(fromDay: LocalDate, toDay: LocalDate): List<String> {
         val d = ChronoUnit.DAYS.between(fromDay, toDay)
+        if (d < 0) return emptyList()
         val rules = mutableListOf<String>()
-        if (d in 0..6) rules += "D$d"
+        rules += "D$d"
         if (d == 7L || d == 14L || d == 21L || d == 28L) rules += "W${d / 7}"
         if (d in 1..7) rules += "Wd${toDay.dayOfWeek.value}"
         if (d in 8..14) rules += "Wn${toDay.dayOfWeek.value}"
@@ -278,7 +277,7 @@ object SnoozeSuggestions {
         return SnoozeStatsSnapshot(sets, tod, result.undoLastCustom)
     }
 
-    /** Greedy: take the key with the most live support, spend every set backing it or a key within 30 minutes, repeat. */
+    /** Greedy: take the key with the most live support, spend every set backing it or a key at the same time, repeat. */
     fun rank(
         partitions: List<SnoozeStatsSnapshot>,
         now: Instant,
@@ -330,7 +329,7 @@ object SnoozeSuggestions {
                 continue
             }
             val absorbed = resolved.keys.filter {
-                it != pickedKey && it !in settled && Math.abs(resolved.getValue(it) - pickedTime) <= WINDOW_MS
+                it != pickedKey && it !in settled && resolved.getValue(it) == pickedTime
             }
             rows += SnoozeRow(pickedTime, labelFor(pickedKey, pickedTime, now, zone), bestScore, pickedKey)
             settled += pickedKey
@@ -430,7 +429,7 @@ object SnoozeSuggestions {
         error("no matching weekday for $dow in [$minDays,$maxDays]")
     }
 
-    /** Strongest slots at least 30 minutes apart on the clock face (earliest from 05:00 on a tie), in clock order. */
+    /** Strongest slots (earliest from 05:00 on a tie), in clock order. */
     fun quickTimes(partitions: List<SnoozeStatsSnapshot>, now: Instant, floor: Double = DEFAULT_FLOOR): List<QuickTime> {
         val nowMs = now.toEpochMilli()
         val weights = mutableMapOf<Int, Double>()
@@ -462,11 +461,7 @@ object SnoozeSuggestions {
             }
             if (best == null || bestWeight <= floor) break
             picked += QuickTime(best, bestWeight)
-            val center = best
-            weights.keys.removeAll { clock ->
-                val d = Math.abs(clock - center)
-                minOf(d, 24 * 60 - d) <= WINDOW_MINUTES
-            }
+            weights.remove(best)
         }
         return picked.sortedBy { it.clockMinutes }
     }
@@ -499,6 +494,8 @@ object SnoozeSuggestions {
             return when {
                 dist == 0 -> today
                 dist == 1 -> DayPhrase("tomorrow", "Tomorrow", adjectival = true)
+                dist <= 6 -> DayPhrase("this", "This ${dayName(weekday)}", adjectival = true)
+                dist <= 13 -> DayPhrase("next", "Next ${dayName(weekday)}", adjectival = true)
                 dist % 7 == 0 && dist <= 28 ->
                     DayPhrase("inWeeks", if (dist == 7) "In a week" else "In ${dist / 7} weeks", adjectival = false)
                 else -> DayPhrase("inDays", "In $dist days", adjectival = false)
@@ -615,7 +612,7 @@ object SnoozeSuggestions {
         return when {
             dist == 0 -> if (region == "morning" || region == "afternoon") RowIcon.TODAY_DAY else RowIcon.TODAY_NIGHT
             dist == 1 -> RowIcon.TOMORROW
-            D_RE.matches(dateRule) || W_RE.matches(dateRule) -> RowIcon.DAYS
+            D_RE.matches(dateRule) || W_RE.matches(dateRule) -> if (dist >= 14) RowIcon.DAYS else RowIcon.WEEKDAY
             WD_RE.matches(dateRule) || WN_RE.matches(dateRule) -> RowIcon.WEEKDAY
             else -> RowIcon.MONTHLY
         }

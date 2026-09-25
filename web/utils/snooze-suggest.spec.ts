@@ -67,9 +67,9 @@ describe("extractKeys", () => {
     expect(keys).not.toContain("Wd0@0800");
   });
 
-  test("a lone far-out custom pick (17 days) matches nothing", () => {
+  test("a lone far-out custom pick (17 days) is its own day count", () => {
     const keys = extractKeys(at(2024, 3, 4, 9, 0), at(2024, 3, 21, 9, 0));
-    expect(keys).toEqual([]);
+    expect(keys).toEqual(["D17@0900", "D17_h0"]);
   });
 
   test("the next 1st-of-month within range credits Dom1", () => {
@@ -116,7 +116,7 @@ describe("commit / decay", () => {
     expect(before.next.sets[setId]?.c).toBeCloseTo(1.5, 5);
   });
 
-  test("the most-used exact time wins and its 5-minute neighbour folds into the same row", () => {
+  test("the most-used exact time ranks first and its 5-minute neighbour is its own row", () => {
     let p = emptyPartition("device-a");
     p = commit(
       p,
@@ -137,7 +137,7 @@ describe("commit / decay", () => {
       "custom",
     ).next;
     const rows = rank([p], at(2024, 3, 7, 10, 0).getTime());
-    expect(rows.map((r) => r.keyId)).toEqual(["D1@0800"]);
+    expect(rows.map((r) => r.keyId)).toEqual(["D1@0800", "D1@0805"]);
     expect(new Date(rows[0].time).getHours()).toBe(8);
     expect(new Date(rows[0].time).getMinutes()).toBe(0);
   });
@@ -380,8 +380,10 @@ describe("labelFor", () => {
     expect(label("D1@0900", "2026-09-23T04:50:00")).toBe("This morning, 09:00");
   });
 
-  test("in a week seen at 04:50 reads in 6 days", () => {
-    expect(label("W1@0900", "2026-09-23T04:50:00")).toBe("In 6 days, 09:00");
+  test("in a week seen at 04:50 reads the weekday", () => {
+    expect(label("W1@0900", "2026-09-23T04:50:00")).toBe(
+      "This Tuesday morning, 09:00",
+    );
   });
 
   test("same-day clock times use the time-of-day name", () => {
@@ -581,12 +583,12 @@ describe("shared fixtures (must match Android)", () => {
 });
 
 describe("quick times", () => {
-  test("a far-out custom pick matches no pattern but still credits its slot, and undo removes it", () => {
+  test("a far-out custom pick learns its day count and credits its slot, and undo removes it", () => {
     const atMs = local("2026-09-22T10:00:00").getTime();
     const target = local("2026-11-06T10:00:00").getTime();
     const p0 = emptyPartition("a");
     const { next, undoSnapshot } = commit(p0, atMs, target, "custom");
-    expect(next.sets).toEqual({});
+    expect(next.sets).toEqual({ "D45@1000__D45_h0": { c: 1, t: atMs } });
     expect(next.tod).toEqual({ "1000": { c: 1, t: atMs } });
     expect(undoCommit(next, undoSnapshot)).toEqual(p0);
   });
@@ -664,27 +666,27 @@ describe("5am day-boundary consistency (Dom/DomL/Mo vs D/W/Wd/Wn)", () => {
   test("T1: a commit between midnight and 5am matches Dom1 AND Mo1 (both read the shifted day)", () => {
     // Commit at 2026-10-02 01:00 -> shifted day is Oct 1, not Oct 2.
     const keys = extractKeys(at(2026, 10, 2, 1, 0), at(2026, 11, 1, 9, 0));
-    expect(keys.sort()).toEqual(["Dom1@0900", "Mo1@0900"]);
+    expect(keys.sort()).toEqual(["D31@0900", "Dom1@0900", "Mo1@0900"]);
   });
 
   test("T2: same window, DomL and Mo1 both match a month-end target", () => {
     // Commit at 2026-11-01 02:00 -> shifted day is Oct 31.
     const keys = extractKeys(at(2026, 11, 1, 2, 0), at(2026, 11, 30, 21, 0));
-    expect(keys.sort()).toEqual(["DomL@2100", "Mo1@2100"]);
+    expect(keys.sort()).toEqual(["D30@2100", "DomL@2100", "Mo1@2100"]);
   });
 
-  test("T3: shifted-day reasoning can turn a pick into a one-off (matches nothing)", () => {
+  test("T3: shifted-day reasoning can leave a pick with only its day count", () => {
     // Commit at 2026-10-01 01:00 -> shifted day is Sep 30; Nov 1 is neither
     // "the next 1st" nor "in a month" from Sep 30.
     const keys = extractKeys(at(2026, 10, 1, 1, 0), at(2026, 11, 1, 9, 0));
-    expect(keys).toEqual([]);
+    expect(keys).toEqual(["D32@0900"]);
   });
 
   test("T4: the same commit made in daytime (no shift) matches Dom1 AND Mo1 too — nextDom/nextMonthEnd are strict", () => {
     // Not in the midnight-5am window, but the anchor day itself (Oct 1) must
     // still roll forward to next month's occurrence, not treat "today" as a match.
     const keys = extractKeys(at(2026, 10, 1, 10, 0), at(2026, 11, 1, 9, 0));
-    expect(keys.sort()).toEqual(["Dom1@0900", "Mo1@0900"]);
+    expect(keys.sort()).toEqual(["D31@0900", "Dom1@0900", "Mo1@0900"]);
   });
 
   test("guard: an ordinary daytime commit is unaffected by the fix", () => {
@@ -733,7 +735,8 @@ describe("row icons and label parts (mirror Android rowIcon)", () => {
     expect(icon("D0@2300", at(2026, 9, 21, 23, 0))).toBe("todayNight");
     expect(icon("D0@1500", at(2026, 9, 21, 15, 0))).toBe("todayDay");
     expect(icon("D1@0900", at(2026, 9, 22, 9, 0))).toBe("tomorrow");
-    expect(icon("D3@0900", at(2026, 9, 24, 9, 0))).toBe("days");
+    expect(icon("D3@0900", at(2026, 9, 24, 9, 0))).toBe("weekday");
+    expect(icon("W2@0900", at(2026, 10, 5, 9, 0))).toBe("days");
     expect(icon("Wd5@0900", at(2026, 9, 25, 9, 0))).toBe("weekday");
     expect(icon("Dom1@0900", at(2026, 10, 1, 9, 0))).toBe("monthly");
     expect(icon("D0_h3", at(2026, 9, 21, 15, 0))).toBe("offset");

@@ -240,7 +240,7 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `the most-used exact slot wins and a 5-minute neighbour is absorbed`() {
+    fun `the most-used exact slot ranks first and a 5-minute neighbour is its own row`() {
         var stats = SnoozeStatsSnapshot()
         var day = LocalDateTime.of(2024, 1, 1, 10, 0)
         for (m in listOf(0, 0, 0, 5)) {
@@ -249,7 +249,7 @@ class SnoozeSuggestionsTest {
         }
         val rows = SnoozeSuggestions.rank(listOf(stats), instant(day), zone)
         val tomorrow = rows.filter { SnoozeSuggestions.labelDist(it.epochMillis, instant(day), zone) == 1 }
-        assertEquals(listOf("D1@0800"), tomorrow.map { it.key })
+        assertEquals(listOf("D1@0800", "D1@0805"), tomorrow.map { it.key })
     }
 
     @Test
@@ -349,7 +349,8 @@ class SnoozeSuggestionsTest {
         assertEquals(RowIcon.TODAY_NIGHT, icon("D0@2300", LocalDateTime.of(2026, 9, 21, 23, 0)))
         assertEquals(RowIcon.TODAY_DAY, icon("D0@1500", LocalDateTime.of(2026, 9, 21, 15, 0)))
         assertEquals(RowIcon.TOMORROW, icon("D1@0900", LocalDateTime.of(2026, 9, 22, 9, 0)))
-        assertEquals(RowIcon.DAYS, icon("D3@0900", LocalDateTime.of(2026, 9, 24, 9, 0)))
+        assertEquals(RowIcon.WEEKDAY, icon("D3@0900", LocalDateTime.of(2026, 9, 24, 9, 0)))
+        assertEquals(RowIcon.DAYS, icon("W2@0900", LocalDateTime.of(2026, 10, 5, 9, 0)))
         assertEquals(RowIcon.WEEKDAY, icon("Wd5@0900", LocalDateTime.of(2026, 9, 25, 9, 0)))
         assertEquals(RowIcon.MONTHLY, icon("Dom1@0900", LocalDateTime.of(2026, 10, 1, 9, 0)))
         assertEquals(RowIcon.OFFSET, icon("D0_h3", LocalDateTime.of(2026, 9, 21, 15, 0)))
@@ -384,7 +385,7 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `quick times pick up to four spaced-out slots, shown in clock order`() {
+    fun `quick times pick the four most used slots, shown in clock order`() {
         val now = instant(LocalDateTime.of(2026, 9, 21, 12, 0))
         val t = now.toEpochMilli()
         val tod = mapOf(
@@ -396,16 +397,7 @@ class SnoozeSuggestionsTest {
             "0030" to SetStat(0.5, t),
         )
         val picked = SnoozeSuggestions.quickTimes(listOf(SnoozeStatsSnapshot(tod = tod)), now)
-        assertEquals(listOf(9 * 60, 14 * 60, 20 * 60, 23 * 60), picked.map { it.clockMinutes })
-    }
-
-    @Test
-    fun `quick times treat slots across midnight as neighbours`() {
-        val now = instant(LocalDateTime.of(2026, 9, 21, 12, 0))
-        val t = now.toEpochMilli()
-        val tod = mapOf("2350" to SetStat(2.0, t), "0010" to SetStat(1.0, t))
-        val picked = SnoozeSuggestions.quickTimes(listOf(SnoozeStatsSnapshot(tod = tod)), now)
-        assertEquals(listOf(23 * 60 + 50), picked.map { it.clockMinutes })
+        assertEquals(listOf(9 * 60, 9 * 60 + 5, 14 * 60, 20 * 60), picked.map { it.clockMinutes })
     }
 
     @Test
