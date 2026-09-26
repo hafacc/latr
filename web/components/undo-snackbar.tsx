@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactElement } from "react";
+import { LuX } from "react-icons/lu";
 import { isMacPlatform } from "../utils/kbd-modifier";
 import { usePwa } from "../utils/pwa";
 import { UNDO_MS, useTodos } from "../utils/store";
@@ -10,12 +11,12 @@ const SNACKBAR = `
         bottom-[calc(env(safe-area-inset-bottom)+88px)] md:bottom-7
         md:left-[calc(50%+var(--sidebar-reserved)/2)]
         flex flex-col overflow-hidden rounded-full
-        bg-inverse text-on-inverse shadow-dock animate-rise
+        bg-snackbar text-on-snackbar shadow-dock animate-rise
 `;
 
 export default function UndoSnackbar(): ReactElement | null {
   const { lastUndo, undoExpiresAt, undo } = useTodos();
-  const { updateReady, applyUpdate } = usePwa();
+  const { updateReady, applyUpdate, dismissUpdate } = usePwa();
 
   if (!lastUndo || !undoExpiresAt) {
     if (updateReady) {
@@ -26,9 +27,17 @@ export default function UndoSnackbar(): ReactElement | null {
             <button
               type="button"
               onClick={applyUpdate}
-              className="px-2 py-1.5 rounded-full font-semibold text-inverse-accent hover:bg-inverse-hover"
+              className="px-2 py-1.5 rounded-full font-semibold text-snackbar-accent hover:bg-snackbar-hover"
             >
               Reload
+            </button>
+            <button
+              type="button"
+              onClick={dismissUpdate}
+              aria-label="Dismiss"
+              className="-ml-2 p-1.5 rounded-full opacity-80 hover:bg-snackbar-hover"
+            >
+              <LuX className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -51,17 +60,17 @@ export default function UndoSnackbar(): ReactElement | null {
         <button
           type="button"
           onClick={undo}
-          className="px-2 py-1.5 rounded-full font-semibold text-inverse-accent hover:bg-inverse-hover"
+          className="px-2 py-1.5 rounded-full font-semibold text-snackbar-accent hover:bg-snackbar-hover"
         >
           Undo
         </button>
-        <kbd className="hidden md:inline mr-2 px-1.5 rounded-md bg-inverse-hover font-sans text-[11.5px] font-medium opacity-80">
+        <kbd className="hidden md:inline mr-2 px-1.5 rounded-md bg-snackbar-hover font-sans text-[11.5px] font-medium opacity-80">
           {isMacPlatform() ? "⌘Z" : "Ctrl+Z"}
         </kbd>
       </div>
       <div
         key={undoExpiresAt}
-        className="h-0.5 bg-inverse-accent origin-left"
+        className="h-0.5 bg-snackbar-accent origin-left"
         style={{ animation: `undo-drain ${UNDO_MS}ms linear forwards` }}
       />
     </div>
