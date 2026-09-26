@@ -16,6 +16,7 @@ type InstallPromptEvent = Event & { prompt: () => Promise<void> };
 type PwaValue = {
   updateReady: boolean;
   applyUpdate: () => void;
+  dismissUpdate: () => void;
   // "prompt": the browser can install on request; "ios": Safari has no prompt, only Share → Add to Home Screen.
   install: "prompt" | "ios" | null;
   promptInstall: () => Promise<void>;
@@ -35,6 +36,7 @@ export function PwaProvider({
   children: ReactNode;
 }): ReactElement {
   const [waiting, setWaiting] = useState<ServiceWorker | null>(null);
+  const [dismissed, setDismissed] = useState<ServiceWorker | null>(null);
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(
     null,
   );
@@ -93,13 +95,16 @@ export function PwaProvider({
 
   const value = useMemo<PwaValue>(
     () => ({
-      updateReady: waiting !== null,
+      updateReady: waiting !== null && waiting !== dismissed,
       applyUpdate() {
         if (!waiting) return;
         navigator.serviceWorker.addEventListener("controllerchange", () =>
           location.reload(),
         );
         waiting.postMessage("skipWaiting");
+      },
+      dismissUpdate() {
+        setDismissed(waiting);
       },
       install: installEvent ? "prompt" : ios ? "ios" : null,
       async promptInstall() {
@@ -108,7 +113,7 @@ export function PwaProvider({
         setInstallEvent(null);
       },
     }),
-    [waiting, installEvent, ios],
+    [waiting, dismissed, installEvent, ios],
   );
 
   return <PwaCtx.Provider value={value}>{children}</PwaCtx.Provider>;
