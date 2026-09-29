@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "name": "latr-firebase",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "set-admin": "bun scripts/set-admin.ts"
+  },
+  "devDependencies": {
+    "firebase-admin": "^13.10.0"
+  }
+}

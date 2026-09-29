@@ -1,5 +1,6 @@
 package io.hafa.latr.ui.auth
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,11 +8,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -23,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.hafa.latr.ui.theme.LatrTheme
@@ -31,6 +35,10 @@ import io.hafa.latr.ui.theme.LatrTheme
 @Composable
 fun AccountBottomSheet(
     authState: AuthState.SignedIn,
+    pickLogEnabled: Boolean,
+    onPickLogChange: (Boolean) -> Unit,
+    isAdmin: Boolean,
+    loadPickCounts: suspend () -> List<Long>?,
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit,
     onDismiss: () -> Unit,
@@ -38,6 +46,7 @@ fun AccountBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showStats by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -67,6 +76,32 @@ fun AccountBottomSheet(
                 )
             }
             Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(value = pickLogEnabled, role = Role.Switch, onValueChange = onPickLogChange)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    text = "Improve snooze suggestions",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(checked = pickLogEnabled, onCheckedChange = null)
+            }
+            if (isAdmin) {
+                Text(
+                    text = "Stats",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showStats = true }
+                        .padding(vertical = 12.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = {
                     onSignOut()
@@ -84,6 +119,10 @@ fun AccountBottomSheet(
                 }
             }
         }
+    }
+
+    if (showStats) {
+        StatsBottomSheet(loadCounts = loadPickCounts, onDismiss = { showStats = false })
     }
 
     if (showDeleteConfirm) {
@@ -129,6 +168,10 @@ private fun AccountBottomSheetPreview() {
                 email = "jane@example.com",
                 photoUrl = null,
             ),
+            pickLogEnabled = false,
+            onPickLogChange = {},
+            isAdmin = true,
+            loadPickCounts = { null },
             onSignOut = {},
             onDeleteAccount = {},
             onDismiss = {}

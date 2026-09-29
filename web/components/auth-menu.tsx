@@ -12,6 +12,7 @@ import {
   useState,
 } from "react";
 import {
+  LuChartColumn,
   LuChevronsUpDown,
   LuDownload,
   LuLogOut,
@@ -25,6 +26,7 @@ import { auth, firebaseConfigured } from "../utils/firebase";
 import { usePwa } from "../utils/pwa";
 import { useTodos } from "../utils/store";
 import Sheet from "./sheet";
+import StatsWindow from "./stats-window";
 import { type ThemeMode, useTheme } from "./theme";
 
 type AuthValue = {
@@ -278,6 +280,66 @@ function InstallRow(): ReactElement | null {
   );
 }
 
+function PickLogRow(): ReactElement {
+  const { snoozePickLog, setSnoozePickLog } = useTodos();
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={snoozePickLog}
+      onClick={() => setSnoozePickLog(!snoozePickLog)}
+      className="flex items-center gap-3 px-2 py-2 rounded-[10px] text-left hover:bg-surface-hover transition-colors"
+    >
+      <span className="flex-1 min-w-0 text-sm text-text">
+        Improve snooze suggestions
+      </span>
+      <span
+        aria-hidden="true"
+        className={`relative w-9 h-5 shrink-0 rounded-full transition-colors ${
+          snoozePickLog ? "bg-accent" : "bg-border"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-surface shadow-pop transition-transform ${
+            snoozePickLog ? "translate-x-4" : ""
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
+function StatsRow({ user }: { user: User }): ReactElement | null {
+  const [admin, setAdmin] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let live = true;
+    user
+      .getIdTokenResult()
+      .then((result) => {
+        if (live) setAdmin(result.claims.admin === true);
+      })
+      .catch((e) => console.error("id token read failed", e));
+    return () => {
+      live = false;
+    };
+  }, [user]);
+  if (!admin) return null;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-2.5 h-10 px-2 rounded-[10px] text-sm text-text hover:bg-surface-hover transition-colors"
+      >
+        <LuChartColumn className="w-4 h-4 text-text-secondary" />
+        Stats
+      </button>
+      {open && <StatsWindow onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 /** Account details, theme and sign-in/out; shared by the desktop popover and the phone sheet. */
 function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
   const { user, signIn, signOut, deleteAccount } = useAuth();
@@ -307,6 +369,8 @@ function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
       )}
       <ThemeSegmented />
       <InstallRow />
+      {user && <PickLogRow />}
+      {user && <StatsRow user={user} />}
       {user ? (
         <div className="flex flex-col">
           <button

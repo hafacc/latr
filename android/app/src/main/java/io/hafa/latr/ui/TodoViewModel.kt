@@ -26,6 +26,7 @@ class TodoViewModel(
     private val snoozeStatsStore: SnoozeStatsStore,
 ) : ViewModel() {
     val snoozePartitions: StateFlow<List<SnoozeStatsSnapshot>> = snoozeStatsStore.partitions
+    val snoozePickLog: StateFlow<Boolean?> = snoozeStatsStore.pickLog
     // null until the first snapshot; lets the UI show a spinner, not a false empty state.
     val todos: StateFlow<List<Todo>?> = storeHolder.store
         .flatMapLatest { it.observeAll() }
@@ -129,12 +130,12 @@ class TodoViewModel(
     }
 
     /** [source] is "suggestion", "last", or "custom"; [pickedKey] is the suggestion row's key. False if [snoozeUntil] has passed. */
-    fun snoozeUndoable(todo: Todo, snoozeUntil: String, source: String, pickedKey: String?): Boolean {
+    fun snoozeUndoable(todo: Todo, snoozeUntil: String, source: String, pickedKey: String?, pickLogKey: String?): Boolean {
         val target = LocalDateTimeUtil.toEpochMillis(snoozeUntil)
         if (target <= System.currentTimeMillis()) return false
         viewModelScope.launch {
             val now = System.currentTimeMillis()
-            val statsUndo = snoozeStatsStore.commit(now, target, source, pickedKey)
+            val statsUndo = snoozeStatsStore.commit(now, target, source, pickedKey, pickLogKey)
             // Buffer the pre-snooze snapshot so undo restores its prior sort position.
             _lastAction = UndoableAction.Snooze(todo, statsUndo)
             armUndo()
@@ -187,6 +188,12 @@ class TodoViewModel(
             onResult(result)
         }
     }
+
+    fun setSnoozePickLog(enabled: Boolean) {
+        viewModelScope.launch { snoozeStatsStore.setPickLog(enabled) }
+    }
+
+    suspend fun loadGlobalPicks(): List<Long>? = snoozeStatsStore.fetchGlobalPicks()
 
     fun signOut() {
         viewModelScope.launch { storeHolder.signOut() }
