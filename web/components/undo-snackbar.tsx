@@ -2,7 +2,7 @@
 
 import type { ReactElement } from "react";
 import { LuX } from "react-icons/lu";
-import { isMacPlatform } from "../utils/kbd-modifier";
+import { isMacPlatform } from "../utils/keyboard";
 import { usePwa } from "../utils/pwa";
 import { UNDO_MS, useTodos } from "../utils/store";
 
