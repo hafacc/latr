@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactElement, type RefObject, useEffect, useState } from "react";
-import { isEditableTarget } from "../utils/keyboard";
+import { hasModifier, isEditableTarget } from "../utils/keyboard";
 import { useTodos } from "../utils/store";
 import TextEditor, { type TextEditorHandle } from "./text-editor";
 
@@ -18,7 +18,7 @@ export default function ComposeRow({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "n") return;
+      if (e.key !== "n" || hasModifier(e)) return;
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
       inputRef.current?.focus();
