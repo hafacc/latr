@@ -25,6 +25,8 @@ data class SnoozeStatsSnapshot(
     val sets: Map<String, SetStat> = emptyMap(),
     val tod: Map<String, SetStat> = emptyMap(),
     val lastCustom: LastCustom? = null,
+    // Lifetime counts per pick log key (see pickLogKey); only written while the user opts in.
+    val picks: Map<String, Long> = emptyMap(),
 )
 
 /** Everything a commit changed, so undo can restore it exactly. */
@@ -35,6 +37,8 @@ data class CommitResult(
     val touchedTodSlot: String?,
     val undoTodSnapshot: SetStat?,
     val undoLastCustom: LastCustom?,
+    val touchedPickKey: String? = null,
+    val undoPickSnapshot: Long? = null,
 )
 
 data class SnoozeRow(val epochMillis: Long, val label: String, val score: Double, val key: PatternKey)
@@ -57,9 +61,12 @@ object SnoozeSuggestions {
     private const val QUICK_TIMES_MAX = 4
     private const val SCORE_EPS = 1e-9
     private const val LITTLE_WHILE_MAX_HOURS = 3
+    const val SHOWN_ROWS = 5
+    const val DEEP_ROWS = 20
 
     val KEY_RE = Regex("^(D(0|[1-9]\\d*)|W[1-4]|Wd[1-7]|Wn[1-7]|Dom1|Dom15|DomL|Mo[1-3])(@([01]\\d|2[0-3])[0-5][05]|_h([0-9]|1[0-2]))$")
     val SLOT_RE = Regex("^([01]\\d|2[0-3])[0-5][05]$")
+    val PICK_RE = Regex("^([1-9]|1\\d|20|none)$")
 
     /** The first :00/:15/:30/:45 strictly after [time]; wraps past midnight. */
     fun nextQuarterHour(time: LocalTime): LocalTime {
@@ -225,6 +232,7 @@ object SnoozeSuggestions {
         zone: ZoneId,
         source: String,
         pickedKey: PatternKey? = null,
+        pickLog: String? = null,
     ): CommitResult {
         val keys = extract(Instant.ofEpochMilli(at), Instant.ofEpochMilli(target), zone)
         val nextLastCustom = if (source == "custom") LastCustom(target, at) else stats.lastCustom
@@ -246,13 +254,18 @@ object SnoozeSuggestions {
             prevTod = stats.tod[slot]
             tod = tod + (slot to bump(prevTod, at, TOD_HALF_LIFE_DAYS))
         }
+        var picks = stats.picks
+        val prevPick = pickLog?.let { stats.picks[it] }
+        if (pickLog != null) picks = picks + (pickLog to (prevPick ?: 0L) + 1L)
         return CommitResult(
-            next = SnoozeStatsSnapshot(sets, tod, nextLastCustom),
+            next = SnoozeStatsSnapshot(sets, tod, nextLastCustom, picks),
             touchedSetId = id,
             undoSetSnapshot = prevSet,
             touchedTodSlot = slot,
             undoTodSnapshot = prevTod,
             undoLastCustom = stats.lastCustom,
+            touchedPickKey = pickLog,
+            undoPickSnapshot = prevPick,
         )
     }
 
@@ -274,15 +287,42 @@ object SnoozeSuggestions {
                 tod - result.touchedTodSlot
             }
         }
-        return SnoozeStatsSnapshot(sets, tod, result.undoLastCustom)
+        var picks = stats.picks
+        if (result.touchedPickKey != null) {
+            picks = if (result.undoPickSnapshot != null) {
+                picks + (result.touchedPickKey to result.undoPickSnapshot)
+            } else {
+                picks - result.touchedPickKey
+            }
+        }
+        return SnoozeStatsSnapshot(sets, tod, result.undoLastCustom, picks)
     }
 
-    /** Greedy: take the key with the most live support, spend every set backing it or a key at the same time, repeat. */
+    /** The menu's rows: the first [SHOWN_ROWS] of [rankDeep], in time order. */
     fun rank(
         partitions: List<SnoozeStatsSnapshot>,
         now: Instant,
         zone: ZoneId,
-        n: Int = 5,
+        n: Int = SHOWN_ROWS,
+        floor: Double = DEFAULT_FLOOR,
+    ): List<SnoozeRow> = shownRows(rankDeep(partitions, now, zone, n, floor), n)
+
+    fun shownRows(deep: List<SnoozeRow>, n: Int = SHOWN_ROWS): List<SnoozeRow> =
+        deep.take(n).sortedBy { it.epochMillis }
+
+    /** The 1-based greedy rank of the deep row landing on [target]'s minute, or "none". */
+    fun pickLogKey(deep: List<SnoozeRow>, target: Long): String {
+        val minute = Math.floorDiv(target, 60_000L)
+        val index = deep.indexOfFirst { Math.floorDiv(it.epochMillis, 60_000L) == minute }
+        return if (index >= 0) "${index + 1}" else "none"
+    }
+
+    /** Greedy: take the key with the most live support, spend every set backing it or a key at the same time, repeat. Rows stay in selection order, so a row's index is its rank. */
+    fun rankDeep(
+        partitions: List<SnoozeStatsSnapshot>,
+        now: Instant,
+        zone: ZoneId,
+        n: Int = DEEP_ROWS,
         floor: Double = DEFAULT_FLOOR,
     ): List<SnoozeRow> {
         val nowMillis = now.toEpochMilli()
@@ -338,7 +378,7 @@ object SnoozeSuggestions {
             val toRemove = available.filter { id -> membersById.getValue(id).any { it in spent } }
             available -= toRemove.toSet()
         }
-        return rows.sortedBy { it.epochMillis }
+        return rows
     }
 
     /** The most recently updated custom pick across every partition, or null. */

@@ -23,7 +23,12 @@ describe("snooze stats wire format (must match Android)", () => {
 
   test("the device id is the path, not a field", () => {
     const wire = toWire(emptyPartition("device-a"));
-    expect(Object.keys(wire).sort()).toEqual(["lastCustom", "sets", "tod"]);
+    expect(Object.keys(wire).sort()).toEqual([
+      "lastCustom",
+      "picks",
+      "sets",
+      "tod",
+    ]);
     expect(wire.lastCustom).toBeNull();
   });
 

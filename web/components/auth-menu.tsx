@@ -278,6 +278,35 @@ function InstallRow(): ReactElement | null {
   );
 }
 
+function PickLogRow(): ReactElement {
+  const { snoozePickLog, setSnoozePickLog } = useTodos();
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={snoozePickLog}
+      onClick={() => setSnoozePickLog(!snoozePickLog)}
+      className="flex items-center gap-3 px-2 py-2 rounded-[10px] text-left hover:bg-surface-hover transition-colors"
+    >
+      <span className="flex-1 min-w-0 text-sm text-text">
+        Improve snooze suggestions
+      </span>
+      <span
+        aria-hidden="true"
+        className={`relative w-9 h-5 shrink-0 rounded-full transition-colors ${
+          snoozePickLog ? "bg-accent" : "bg-border"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-surface shadow-pop transition-transform ${
+            snoozePickLog ? "translate-x-4" : ""
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
 /** Account details, theme and sign-in/out; shared by the desktop popover and the phone sheet. */
 function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
   const { user, signIn, signOut, deleteAccount } = useAuth();
@@ -307,6 +336,7 @@ function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
       )}
       <ThemeSegmented />
       <InstallRow />
+      {user && <PickLogRow />}
       {user ? (
         <div className="flex flex-col">
           <button

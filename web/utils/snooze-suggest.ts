@@ -8,10 +8,13 @@ const SLOT_MINUTES = 5;
 const QUICK_TIMES_MAX = 4;
 const SCORE_EPS = 1e-9;
 const LITTLE_WHILE_MAX_HOURS = 3;
+export const SHOWN_ROWS = 5;
+export const DEEP_ROWS = 20;
 
 export const KEY_RE =
   /^(D(0|[1-9]\d*)|W[1-4]|Wd[1-7]|Wn[1-7]|Dom1|Dom15|DomL|Mo[1-3])(@([01]\d|2[0-3])[0-5][05]|_h([0-9]|1[0-2]))$/;
 export const SLOT_RE = /^([01]\d|2[0-3])[0-5][05]$/;
+export const PICK_RE = /^([1-9]|1\d|20|none)$/;
 
 export type SnoozeSource = "suggestion" | "last" | "custom";
 
@@ -22,10 +25,12 @@ export type DevicePartition = {
   // Date-independent counts per "HHMM" clock slot, for the custom picker's quick times.
   tod: Record<string, SetEntry>;
   lastCustom: { target: number; at: number } | null;
+  // Lifetime counts per pick log key (see pickLogKey); only written while the user opts in.
+  picks: Record<string, number>;
 };
 
 export function emptyPartition(deviceId: string): DevicePartition {
-  return { deviceId, sets: {}, tod: {}, lastCustom: null };
+  return { deviceId, sets: {}, tod: {}, lastCustom: null, picks: {} };
 }
 
 function addDays(d: Date, days: number): Date {
@@ -301,6 +306,8 @@ export type CommitUndoSnapshot = {
   // Null when the commit credited no quick-time slot.
   tod: { slot: string; prev: SetEntry | null } | null;
   prevLastCustom: DevicePartition["lastCustom"];
+  // Null when the commit logged no pick.
+  pick: { key: string; prev: number | null } | null;
 };
 
 export type CommitResult = {
@@ -335,6 +342,7 @@ export function commit(
   target: number,
   source: SnoozeSource,
   pickedKey: string | null = null,
+  pickLog: string | null = null,
 ): CommitResult {
   const keys = extractKeys(new Date(at), new Date(target));
 
@@ -364,14 +372,29 @@ export function commit(
   const lastCustom =
     source === "custom" ? { target, at } : partition.lastCustom;
 
+  const nextPicks = { ...partition.picks };
+  let undoPick: CommitUndoSnapshot["pick"] = null;
+  if (pickLog !== null) {
+    const prev = partition.picks[pickLog] ?? null;
+    nextPicks[pickLog] = (prev ?? 0) + 1;
+    undoPick = { key: pickLog, prev };
+  }
+
   return {
     next: {
       deviceId: partition.deviceId,
       sets: nextSets,
       tod: nextTod,
       lastCustom,
+      picks: nextPicks,
     },
-    undoSnapshot: { setId: undoSetId, prevSet, tod: undoTod, prevLastCustom },
+    undoSnapshot: {
+      setId: undoSetId,
+      prevSet,
+      tod: undoTod,
+      prevLastCustom,
+      pick: undoPick,
+    },
   };
 }
 
@@ -389,11 +412,17 @@ export function undoCommit(
     if (snap.tod.prev) tod[snap.tod.slot] = snap.tod.prev;
     else delete tod[snap.tod.slot];
   }
+  const picks = { ...partition.picks };
+  if (snap.pick) {
+    if (snap.pick.prev !== null) picks[snap.pick.key] = snap.pick.prev;
+    else delete picks[snap.pick.key];
+  }
   return {
     deviceId: partition.deviceId,
     sets,
     tod,
     lastCustom: snap.prevLastCustom,
+    picks,
   };
 }
 
@@ -504,10 +533,11 @@ function liveMembers(setId: string): string[] {
   );
 }
 
-export function rank(
+/** Rows in greedy selection order, so a row's index is its rank; the menu shows the first SHOWN_ROWS (see `rank`). */
+export function rankDeep(
   partitions: DevicePartition[],
   now: number,
-  n = 5,
+  n = DEEP_ROWS,
   floor = DEFAULT_FLOOR,
 ): Row[] {
   const liveSets = new Map<string, number>();
@@ -584,8 +614,30 @@ export function rank(
     }
   }
 
-  rows.sort((x, y) => x.time - y.time);
   return rows;
+}
+
+/** The menu's rows: the first [n] of the greedy order, in time order. */
+export function shownRows(deep: Row[], n = SHOWN_ROWS): Row[] {
+  return deep.slice(0, n).sort((x, y) => x.time - y.time);
+}
+
+export function rank(
+  partitions: DevicePartition[],
+  now: number,
+  n = SHOWN_ROWS,
+  floor = DEFAULT_FLOOR,
+): Row[] {
+  return shownRows(rankDeep(partitions, now, n, floor), n);
+}
+
+/** The 1-based greedy rank of the deep row landing on `target`'s minute, or "none". */
+export function pickLogKey(deep: Row[], target: number): string {
+  const minute = Math.floor(target / MINUTE_MS);
+  const index = deep.findIndex(
+    (row) => Math.floor(row.time / MINUTE_MS) === minute,
+  );
+  return index >= 0 ? `${index + 1}` : "none";
 }
 
 export function lastRow(

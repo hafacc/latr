@@ -1,6 +1,6 @@
 "use client";
 
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { doc, increment, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { fromWire, toWire } from "./snooze-stats-wire";
 import {
@@ -62,6 +62,8 @@ export class SnoozeStatsStore {
   private retryAttempt = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private onStorage: ((e: StorageEvent) => void) | null = null;
+  // `users/{uid}.snoozePickLog`; null while signed out or before the first snapshot.
+  private pickLog: boolean | null = null;
 
   constructor() {
     this.local = emptyPartition(getOrCreateDeviceId());
@@ -109,16 +111,50 @@ export class SnoozeStatsStore {
     };
   }
 
+  getPickLog(): boolean {
+    return this.pickLog === true;
+  }
+
+  /** Per user, so it covers every device; turning it off also clears this device's picks. */
+  setPickLog(enabled: boolean): void {
+    if (!this.uid) return;
+    this.pickLog = enabled;
+    const fields: Record<string, unknown> = { snoozePickLog: enabled };
+    const mergeFields = ["snoozePickLog"];
+    if (!enabled) {
+      this.syncLocal();
+      this.local = { ...this.local, picks: {} };
+      this.rebuildPartitionsCache();
+      this.persistNow();
+      fields.snoozeStats = { [this.local.deviceId]: toWire(this.local) };
+      mergeFields.push(`snoozeStats.${this.local.deviceId}`);
+    }
+    void setDoc(doc(db(), "users", this.uid), fields, { mergeFields }).catch(
+      (e) => console.error("snooze pick log toggle failed", e),
+    );
+    this.emit();
+  }
+
   commit(
     at: number,
     target: number,
     source: SnoozeSource,
     pickedKey: string | null = null,
+    pickLogKey: string | null = null,
   ): CommitUndoSnapshot {
     this.syncLocal();
-    const result = commitPure(this.local, at, target, source, pickedKey);
+    const result = commitPure(
+      this.local,
+      at,
+      target,
+      source,
+      pickedKey,
+      this.uid && this.pickLog === true ? pickLogKey : null,
+    );
     this.local = result.next;
     this.afterLocalChange();
+    if (result.undoSnapshot.pick)
+      this.bumpGlobalPick(result.undoSnapshot.pick.key, 1);
     return result.undoSnapshot;
   }
 
@@ -126,11 +162,13 @@ export class SnoozeStatsStore {
     this.syncLocal();
     this.local = undoCommitPure(this.local, snapshot);
     this.afterLocalChange();
+    if (snapshot.pick) this.bumpGlobalPick(snapshot.pick.key, -1);
   }
 
   /** Sign-in: push the whole local partition once (user-initiated, like mergeLocalIntoFirestore). */
   async pushToRemote(uid: string): Promise<void> {
     this.ensureOwner(uid);
+    this.dropPicksIfOff();
     await setDoc(
       doc(db(), "users", uid),
       { snoozeStats: { [this.local.deviceId]: toWire(this.local) } },
@@ -162,8 +200,9 @@ export class SnoozeStatsStore {
         // A server-confirmed emission means the listener is healthy again.
         if (!snap.metadata.fromCache) this.retryAttempt = 0;
         const data = snap.data() as
-          | { snoozeStats?: Record<string, unknown> }
+          | { snoozeStats?: Record<string, unknown>; snoozePickLog?: unknown }
           | undefined;
+        this.pickLog = data?.snoozePickLog === true;
         const stats = data?.snoozeStats ?? {};
         // Our own partition comes from localStorage, which is always at least as new.
         this.remote = new Map(
@@ -244,6 +283,7 @@ export class SnoozeStatsStore {
       this.retryTimer = null;
     }
     this.uid = null;
+    this.pickLog = null;
     this.remote = new Map();
     this.rebuildPartitionsCache();
   }
@@ -257,7 +297,15 @@ export class SnoozeStatsStore {
     this.listeners.clear();
   }
 
+  private dropPicksIfOff(): void {
+    if (this.pickLog === false && Object.keys(this.local.picks).length > 0) {
+      this.local = { ...this.local, picks: {} };
+      this.persistNow();
+    }
+  }
+
   private afterLocalChange(): void {
+    this.dropPicksIfOff();
     this.rebuildPartitionsCache();
     this.persistNow();
     this.mirror();
@@ -271,6 +319,17 @@ export class SnoozeStatsStore {
       { snoozeStats: { [this.local.deviceId]: toWire(this.local) } },
       { mergeFields: [`snoozeStats.${this.local.deviceId}`] },
     ).catch((e) => console.error("snooze-stats mirror failed", e));
+  }
+
+  /** Separate from the partition write so a rules rejection can't cost the user's stats. */
+  private bumpGlobalPick(key: string, delta: 1 | -1): void {
+    if (!this.uid || this.pickLog !== true) return;
+    // `key` names the bumped field, since rules can't pull it out of the changed-field set.
+    void setDoc(
+      doc(db(), "snoozePickLog", "global"),
+      { [key]: increment(delta), key },
+      { merge: true },
+    ).catch((e) => console.error("global snooze pick log failed", e));
   }
 
   private persistNow(): void {

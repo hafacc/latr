@@ -23,7 +23,9 @@ import type {
 import {
   lastRow as computeLastRow,
   quickTimes as computeQuickTimes,
-  rank as rankSnoozeRows,
+  pickLogKey,
+  rankDeep,
+  shownRows,
 } from "./snooze-suggest";
 import { TodoStoreHolder } from "./store-holder";
 import {
@@ -108,6 +110,8 @@ type ContextShape = UiState & {
   snoozeRows: Row[];
   snoozeLastRow: LastRow | null;
   snoozeQuickTimes: QuickTime[];
+  snoozePickLog: boolean;
+  setSnoozePickLog: (enabled: boolean) => void;
   refreshNow: () => void;
   create: (text?: string) => Todo;
   edit: (id: string, text: string) => void;
@@ -181,10 +185,11 @@ export function TodoProvider({ children }: { children: ReactNode }) {
     getStatsSnapshot,
     getStatsServerSnapshot,
   );
-  const snoozeRows = useMemo(
-    () => rankSnoozeRows(snoozePartitions, now),
+  const snoozeDeepRows = useMemo(
+    () => rankDeep(snoozePartitions, now),
     [snoozePartitions, now],
   );
+  const snoozeRows = useMemo(() => shownRows(snoozeDeepRows), [snoozeDeepRows]);
   const snoozeLastRow = useMemo(
     () => computeLastRow(snoozePartitions, now, snoozeRows),
     [snoozePartitions, now, snoozeRows],
@@ -194,6 +199,20 @@ export function TodoProvider({ children }: { children: ReactNode }) {
     [snoozePartitions, now],
   );
   const refreshNow = useCallback(() => setNow(Date.now()), []);
+  const getPickLog = useCallback(
+    () => holder.snoozeStats.getPickLog(),
+    [holder],
+  );
+  const getPickLogServer = useCallback(() => false, []);
+  const snoozePickLog = useSyncExternalStore(
+    subscribeStats,
+    getPickLog,
+    getPickLogServer,
+  );
+  const setSnoozePickLog = useCallback(
+    (enabled: boolean) => holder.snoozeStats.setPickLog(enabled),
+    [holder],
+  );
 
   // Auto-expire the undo window.
   useEffect(() => {
@@ -318,6 +337,7 @@ export function TodoProvider({ children }: { children: ReactNode }) {
         epoch,
         source,
         pickedKey ?? null,
+        pickLogKey(snoozeDeepRows, epoch),
       );
       // Buffer the pre-snooze snapshot so undo restores its prior sort position.
       dispatch({
@@ -326,7 +346,7 @@ export function TodoProvider({ children }: { children: ReactNode }) {
       });
       return true;
     },
-    [holder],
+    [holder, snoozeDeepRows],
   );
 
   const togglePinned = useCallback(
@@ -418,6 +438,8 @@ export function TodoProvider({ children }: { children: ReactNode }) {
       snoozeRows,
       snoozeLastRow,
       snoozeQuickTimes,
+      snoozePickLog,
+      setSnoozePickLog,
       refreshNow,
       create,
       edit,
@@ -444,6 +466,8 @@ export function TodoProvider({ children }: { children: ReactNode }) {
       snoozeRows,
       snoozeLastRow,
       snoozeQuickTimes,
+      snoozePickLog,
+      setSnoozePickLog,
       refreshNow,
       create,
       edit,

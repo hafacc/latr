@@ -121,6 +121,19 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
+    fun `a commit counts its pick and undo removes exactly that count`() {
+        val at = epoch(LocalDateTime.of(2026, 9, 22, 10, 0))
+        val target = epoch(LocalDateTime.of(2026, 9, 23, 9, 0))
+        val before = SnoozeStatsSnapshot(picks = mapOf("1" to 2L))
+        val first = SnoozeSuggestions.commit(before, at, target, zone, "suggestion", "D1@0900", "1")
+        assertEquals(mapOf("1" to 3L), first.next.picks)
+        val second = SnoozeSuggestions.commit(first.next, at, target, zone, "custom", null, "4")
+        assertEquals(mapOf("1" to 3L, "4" to 1L), second.next.picks)
+        assertEquals(first.next, SnoozeSuggestions.revert(second.next, second))
+        assertEquals(before, SnoozeSuggestions.revert(first.next, first))
+    }
+
+    @Test
     fun `undo of a commit that gave no quick-time credit leaves quick times untouched`() {
         val before = SnoozeStatsSnapshot()
         val result = commitOnce(before, LocalDateTime.of(2024, 1, 1, 10, 0), LocalDateTime.of(2024, 1, 1, 13, 0))

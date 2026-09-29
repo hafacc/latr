@@ -89,10 +89,10 @@ private const val MENU_CLOCK_TICK_MS = 30_000L
 
 private fun buildMenuRows(
     partitions: List<SnoozeStatsSnapshot>,
+    deep: List<SnoozeRow>,
     now: Instant,
-    zone: ZoneId,
 ): List<MenuRow> {
-    val suggestions = SnoozeSuggestions.rank(partitions, now, zone)
+    val suggestions = SnoozeSuggestions.shownRows(deep)
     val rows = mutableListOf<MenuRow>()
     rows += suggestions.map { MenuRow.Suggestion(it) }
     SnoozeSuggestions.lastRow(partitions, now, suggestions)?.let { rows += MenuRow.Last(it) }
@@ -105,7 +105,7 @@ private fun buildMenuRows(
 @Composable
 fun SnoozeBottomSheet(
     onDismiss: () -> Unit,
-    onSnoozeSelected: (isoDateTime: String, source: String, pickedKey: String?) -> Boolean,
+    onSnoozeSelected: (isoDateTime: String, source: String, pickedKey: String?, pickLogKey: String) -> Boolean,
     partitions: List<SnoozeStatsSnapshot>,
     modifier: Modifier = Modifier,
     todoText: String = "",
@@ -120,7 +120,8 @@ fun SnoozeBottomSheet(
             now = Instant.now()
         }
     }
-    val rows = remember(now, partitions, zone) { buildMenuRows(partitions, now, zone) }
+    val deep = remember(now, partitions, zone) { SnoozeSuggestions.rankDeep(partitions, now, zone) }
+    val rows = remember(deep, partitions, now) { buildMenuRows(partitions, deep, now) }
     val quickTimes = remember(now, partitions) { SnoozeSuggestions.quickTimes(partitions, now) }
     var step by remember { mutableStateOf(SheetStep.MENU) }
     val today = LocalDate.ofInstant(now, zone)
@@ -135,7 +136,8 @@ fun SnoozeBottomSheet(
     )
 
     val pick = { epochMillis: Long, source: String, pickedKey: String? ->
-        if (onSnoozeSelected(LocalDateTimeUtil.fromEpochMillis(epochMillis, zone), source, pickedKey)) {
+        val pickLogKey = SnoozeSuggestions.pickLogKey(deep, epochMillis)
+        if (onSnoozeSelected(LocalDateTimeUtil.fromEpochMillis(epochMillis, zone), source, pickedKey, pickLogKey)) {
             onDismiss()
         } else {
             now = Instant.now()
@@ -449,7 +451,7 @@ private fun SnoozeOptionsPreviewContent(
     partitions: List<SnoozeStatsSnapshot>,
 ) {
     val zone = ZoneId.systemDefault()
-    val rows = buildMenuRows(partitions, now, zone)
+    val rows = buildMenuRows(partitions, SnoozeSuggestions.rankDeep(partitions, now, zone), now)
     Column(
         modifier = Modifier
             .fillMaxWidth()
