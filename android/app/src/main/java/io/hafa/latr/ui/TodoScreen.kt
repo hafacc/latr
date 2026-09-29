@@ -6,7 +6,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -237,6 +237,8 @@ private fun Modifier.filterSwipe(
 }
 
 private const val EDGE_REJECT_DP = 24
+private const val CORNER_MAX_DP = 16
+private const val CORNER_RAMP_DP = 24
 
 /** How far item [index]'s bottom sits below the list's unobscured area (0 if clear or not laid out). */
 private fun overflowPastBar(listState: LazyListState, index: Int): Float {
@@ -1052,15 +1054,13 @@ fun TodoItem(
     val baseViewConfig = LocalViewConfiguration.current
     val swipeViewConfig = remember(baseViewConfig) { inflatedSlop(baseViewConfig) }
     val swipeDirection by remember { derivedStateOf { dismissState.dismissDirection } }
-    val cornerRadius = animateDpAsState(
-        if (swipeDirection != SwipeToDismissBoxValue.Settled) 16.dp else 0.dp,
-        tween(300),
-        label = "rowCorner",
-    )
-    // Kept after the row settles so the swipe color stays under the corners while they square off.
-    var lastSwipeDirection by remember { mutableStateOf(SwipeToDismissBoxValue.Settled) }
-    LaunchedEffect(swipeDirection) {
-        if (swipeDirection != SwipeToDismissBoxValue.Settled) lastSwipeDirection = swipeDirection
+    val cornerMaxPx = with(LocalDensity.current) { CORNER_MAX_DP.dp.toPx() }
+    val cornerRampPx = with(LocalDensity.current) { CORNER_RAMP_DP.dp.toPx() }
+    val cornerRadius by remember {
+        derivedStateOf {
+            val offset = runCatching { dismissState.requireOffset() }.getOrDefault(0f)
+            cornerMaxPx * LinearOutSlowInEasing.transform((abs(offset) / cornerRampPx).coerceAtMost(1f))
+        }
     }
 
     // Programmatic focus (new todo, scroll-to-focus): open the editor, caret at end.
@@ -1125,12 +1125,8 @@ fun TodoItem(
             scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
         },
         backgroundContent = {
-            val direction =
-                if (swipeDirection != SwipeToDismissBoxValue.Settled) swipeDirection else lastSwipeDirection
-            val rounded = cornerRadius.value > 0.dp
-            if (direction != SwipeToDismissBoxValue.Settled &&
-                (swipeDirection != SwipeToDismissBoxValue.Settled || rounded)
-            ) {
+            val direction = swipeDirection
+            if (direction != SwipeToDismissBoxValue.Settled) {
                 val colorScheme = MaterialTheme.colorScheme
                 val done = todo.state == TodoState.DONE
                 val look = when (direction) {
@@ -1199,8 +1195,7 @@ fun TodoItem(
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
                 .drawBehind {
-                    val radius = cornerRadius.value.toPx()
-                    drawRoundRect(rowColor, cornerRadius = CornerRadius(radius, radius))
+                    drawRoundRect(rowColor, cornerRadius = CornerRadius(cornerRadius, cornerRadius))
                 }
                 .semantics {
                     val done = todo.state == TodoState.DONE
