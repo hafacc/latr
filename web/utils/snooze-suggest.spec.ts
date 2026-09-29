@@ -13,14 +13,17 @@ import {
   labelFor,
   labelParts,
   lastRow,
+  pickLogKey,
   quickTimeEpoch,
   quickTimeSlot,
   quickTimes,
   type Row,
   rank,
+  rankDeep,
   resolveKey,
   rowIcon,
   type SnoozeSource,
+  shownRows,
   undoCommit,
 } from "./snooze-suggest";
 
@@ -481,6 +484,20 @@ type Fixtures = {
     partitions: unknown[];
     expectKeys: string[];
   }[];
+  rankDeep: {
+    name: string;
+    now: string;
+    partitions: unknown[];
+    expectKeys: string[];
+    expectShownKeys: string[];
+  }[];
+  pickLog: {
+    name: string;
+    now: string;
+    partitions: unknown[];
+    target: string;
+    expect: string;
+  }[];
 };
 
 const fixtures = JSON.parse(
@@ -578,8 +595,53 @@ describe("shared fixtures (must match Android)", () => {
       const partitions = c.partitions.map((raw, i) => fromWire(`p${i}`, raw));
       const got = rank(partitions, local(c.now).getTime()).map((r) => r.keyId);
       expect(got).toEqual(c.expectKeys);
+      const deep = rankDeep(partitions, local(c.now).getTime());
+      expect(shownRows(deep).map((r) => r.keyId)).toEqual(c.expectKeys);
     });
   }
+
+  for (const c of fixtures.rankDeep) {
+    test(`rankDeep: ${c.name}`, () => {
+      const partitions = c.partitions.map((raw, i) => fromWire(`p${i}`, raw));
+      const deep = rankDeep(partitions, local(c.now).getTime());
+      expect(deep.map((r) => r.keyId)).toEqual(c.expectKeys);
+      expect(shownRows(deep).map((r) => r.keyId)).toEqual(c.expectShownKeys);
+      expect(
+        rank(partitions, local(c.now).getTime()).map((r) => r.keyId),
+      ).toEqual(c.expectShownKeys);
+    });
+  }
+
+  for (const c of fixtures.pickLog) {
+    test(`pickLog: ${c.name}`, () => {
+      const partitions = c.partitions.map((raw, i) => fromWire(`p${i}`, raw));
+      const deep = rankDeep(partitions, local(c.now).getTime());
+      expect(pickLogKey(deep, local(c.target).getTime())).toBe(c.expect);
+    });
+  }
+});
+
+describe("pick log", () => {
+  test("a commit counts its pick and undo removes exactly that count", () => {
+    const atMs = local("2026-09-22T10:00:00").getTime();
+    const target = local("2026-09-23T09:00:00").getTime();
+    const p0 = { ...emptyPartition("a"), picks: { "1": 2 } };
+    const first = commit(p0, atMs, target, "suggestion", "D1@0900", "1");
+    expect(first.next.picks).toEqual({ "1": 3 });
+    const second = commit(first.next, atMs, target, "custom", null, "4");
+    expect(second.next.picks).toEqual({ "1": 3, "4": 1 });
+    expect(undoCommit(second.next, second.undoSnapshot)).toEqual(first.next);
+    expect(undoCommit(first.next, first.undoSnapshot)).toEqual(p0);
+  });
+
+  test("a commit without a pick key leaves the counts alone", () => {
+    const atMs = local("2026-09-22T10:00:00").getTime();
+    const target = local("2026-09-23T09:00:00").getTime();
+    const p0 = { ...emptyPartition("a"), picks: { none: 1 } };
+    const { next, undoSnapshot } = commit(p0, atMs, target, "custom");
+    expect(next.picks).toEqual({ none: 1 });
+    expect(undoSnapshot.pick).toBeNull();
+  });
 });
 
 describe("quick times", () => {

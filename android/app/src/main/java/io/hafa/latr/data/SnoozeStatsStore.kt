@@ -2,6 +2,7 @@ package io.hafa.latr.data
 
 import android.util.Log
 import com.google.firebase.firestore.FieldPath
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -48,6 +49,10 @@ class SnoozeStatsStore(
     private val _local = MutableStateFlow(SnoozeStatsSnapshot())
     private val _remote = MutableStateFlow<Map<String, SnoozeStatsSnapshot>>(emptyMap())
     private var remoteListener: ListenerRegistration? = null
+
+    // `users/{uid}.snoozePickLog`; null while signed out or before the first snapshot.
+    private val _pickLog = MutableStateFlow<Boolean?>(null)
+    val pickLog: StateFlow<Boolean?> = _pickLog
 
     /** This device's partition plus every other device's, ready to feed [SnoozeSuggestions.rank]. */
     val partitions: StateFlow<List<SnoozeStatsSnapshot>> =
@@ -100,7 +105,10 @@ class SnoozeStatsStore(
         val lastCustom = userPreferences.lastCustomTarget?.let { target ->
             userPreferences.lastCustomAt?.let { at -> LastCustom(target, at) }
         }
-        return SnoozeStatsSnapshot(sets, tod, lastCustom)
+        val picks = dao.getAllPicks()
+            .filter { SnoozeSuggestions.PICK_RE.matches(it.pick) && it.n > 0 }
+            .associate { it.pick to it.n }
+        return SnoozeStatsSnapshot(sets, tod, lastCustom, picks)
     }
 
     private var retryAttempt = 0
@@ -139,6 +147,7 @@ class SnoozeStatsStore(
                 return@addSnapshotListener
             }
             retryAttempt = 0
+            _pickLog.value = snap?.get("snoozePickLog") == true
             val raw = snap?.get("snoozeStats") as? Map<*, *> ?: emptyMap<String, Any?>()
             val myId = deviceId
             _remote.value = raw.entries
@@ -164,13 +173,17 @@ class SnoozeStatsStore(
         retryJob?.cancel()
         retryJob = null
         _remote.value = emptyMap()
+        _pickLog.value = null
     }
 
-    suspend fun commit(at: Long, target: Long, source: String, pickedKey: String?): CommitResult =
+    /** [pickLogKey] is counted only while signed in and opted in. */
+    suspend fun commit(at: Long, target: Long, source: String, pickedKey: String?, pickLogKey: String?): CommitResult =
         withContext(Dispatchers.Main.immediate) {
             loaded.await()
-            currentUidOrNull()?.let { ensureOwner(it) }
-            val result = SnoozeSuggestions.commit(_local.value, at, target, zoneProvider(), source, pickedKey)
+            val uid = currentUidOrNull()
+            uid?.let { ensureOwner(it) }
+            val pickLogged = if (uid != null && _pickLog.value == true) pickLogKey else null
+            val result = SnoozeSuggestions.commit(_local.value, at, target, zoneProvider(), source, pickedKey, pickLogged)
             _local.value = result.next
             roomWrites.trySend { persist(result) }
             if (source == "custom") {
@@ -178,6 +191,7 @@ class SnoozeStatsStore(
                 userPreferences.lastCustomAt = at
             }
             mirror()
+            result.touchedPickKey?.let { bumpGlobalPick(it, 1) }
             result
         }
 
@@ -189,6 +203,25 @@ class SnoozeStatsStore(
         userPreferences.lastCustomTarget = result.undoLastCustom?.target
         userPreferences.lastCustomAt = result.undoLastCustom?.at
         mirror()
+        result.touchedPickKey?.let { bumpGlobalPick(it, -1) }
+    }
+
+    /** Separate from the partition write so a rules rejection can't cost the user's stats. */
+    private fun bumpGlobalPick(key: String, delta: Long) {
+        if (currentUidOrNull() == null || _pickLog.value != true) return
+        val fs = firestore ?: return
+        // `key` names the bumped field, since rules can't pull it out of the changed-field set.
+        fs.collection("snoozePickLog").document("global")
+            .set(mapOf(key to FieldValue.increment(delta), "key" to key), SetOptions.merge())
+            .addOnFailureListener { Log.w(TAG, "global snooze pick log failed", it) }
+    }
+
+    /** One read of `snoozePickLog/global`; null if it fails (only admins may read it). */
+    suspend fun fetchGlobalPicks(): List<Long>? {
+        val fs = firestore ?: return null
+        return runCatching {
+            SnoozeStatsWire.globalPickCounts(fs.collection("snoozePickLog").document("global").get().await().data)
+        }.onFailure { Log.w(TAG, "global snooze pick log read failed", it) }.getOrNull()
     }
 
     /** Called only from sign-in. */
@@ -197,6 +230,31 @@ class SnoozeStatsStore(
         val uid = currentUidOrNull() ?: return@withContext
         ensureOwner(uid)
         mirror()
+    }
+
+    /** Per user, so it covers every device; turning it off also clears this device's picks. */
+    suspend fun setPickLog(enabled: Boolean) = withContext(Dispatchers.Main.immediate) {
+        loaded.await()
+        val uid = currentUidOrNull() ?: return@withContext
+        val fs = firestore ?: return@withContext
+        ensureOwner(uid)
+        _pickLog.value = enabled
+        val payload = mutableMapOf<String, Any>("snoozePickLog" to enabled)
+        val fields = mutableListOf(FieldPath.of("snoozePickLog"))
+        if (!enabled) {
+            dropPicks()
+            payload["snoozeStats"] = mapOf(deviceId to SnoozeStatsWire.toWire(_local.value))
+            fields += FieldPath.of("snoozeStats", deviceId)
+        }
+        fs.collection("users").document(uid)
+            .set(payload, SetOptions.mergeFieldPaths(fields))
+            .addOnFailureListener { Log.w(TAG, "snoozePickLog write failed", it) }
+    }
+
+    private fun dropPicks() {
+        if (_local.value.picks.isEmpty()) return
+        _local.value = _local.value.copy(picks = emptyMap())
+        roomWrites.trySend { dao.clearPicks() }
     }
 
     suspend fun deleteRemote(uid: String) {
@@ -209,7 +267,9 @@ class SnoozeStatsStore(
         val setUpsert = id?.let { result.next.sets[it] }?.let { SnoozeSetEntity(id, it.c, it.t) }
         val slot = result.touchedTodSlot
         val todUpsert = slot?.let { result.next.tod[it] }?.let { SnoozeTodEntity(slot, it.c, it.t) }
-        dao.applyCommitChanges(setUpsert, null, todUpsert, null)
+        val pick = result.touchedPickKey
+        val pickUpsert = pick?.let { result.next.picks[it] }?.let { SnoozePickEntity(pick, it) }
+        dao.applyCommitChanges(setUpsert, null, todUpsert, null, pickUpsert, null)
     }
 
     private suspend fun persistRevert(result: CommitResult) {
@@ -219,12 +279,16 @@ class SnoozeStatsStore(
         val slot = result.touchedTodSlot
         val todUpsert = if (slot != null) result.undoTodSnapshot?.let { SnoozeTodEntity(slot, it.c, it.t) } else null
         val todDelete = if (slot != null && result.undoTodSnapshot == null) slot else null
-        dao.applyCommitChanges(setUpsert, setDelete, todUpsert, todDelete)
+        val pick = result.touchedPickKey
+        val pickUpsert = if (pick != null) result.undoPickSnapshot?.let { SnoozePickEntity(pick, it) } else null
+        val pickDelete = if (pick != null && result.undoPickSnapshot == null) pick else null
+        dao.applyCommitChanges(setUpsert, setDelete, todUpsert, todDelete, pickUpsert, pickDelete)
     }
 
     private fun mirror() {
         val uid = currentUidOrNull() ?: return
         val fs = firestore ?: return
+        if (_pickLog.value == false) dropPicks()
         val id = deviceId
         val payload = mapOf("snoozeStats" to mapOf(id to SnoozeStatsWire.toWire(_local.value)))
         fs.collection("users").document(uid)

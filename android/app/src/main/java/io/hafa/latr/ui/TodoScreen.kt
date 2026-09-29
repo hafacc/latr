@@ -98,6 +98,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -502,6 +503,7 @@ fun TodoScreen(
     val focusId by viewModel.focusId.collectAsState()
     val fastCreationId by viewModel.fastCreationId.collectAsState()
     val snoozePartitions by viewModel.snoozePartitions.collectAsState()
+    val snoozePickLog by viewModel.snoozePickLog.collectAsState()
 
     val undoVisible by viewModel.undoVisible.collectAsState()
     val undoLabel by viewModel.undoLabel.collectAsState()
@@ -547,8 +549,10 @@ fun TodoScreen(
                 showSnoozeSheet = false
                 todoToSnooze = null
             },
-            onSnoozeSelected = { isoDateTime, source, pickedKey ->
-                todoToSnooze?.let { todo -> viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey) } ?: false
+            onSnoozeSelected = { isoDateTime, source, pickedKey, pickLogKey ->
+                todoToSnooze?.let { todo ->
+                    viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey, pickLogKey)
+                } ?: false
             },
             partitions = snoozePartitions,
             todoText = todoToSnooze?.text.orEmpty(),
@@ -578,8 +582,13 @@ fun TodoScreen(
     if (showAccountSheet) {
         val signedIn = authState as? AuthState.SignedIn
         if (signedIn != null) {
+            val isAdmin by produceState(false, signedIn) { value = authManager?.isAdmin() == true }
             AccountBottomSheet(
                 authState = signedIn,
+                pickLogEnabled = snoozePickLog == true,
+                onPickLogChange = { viewModel.setSnoozePickLog(it) },
+                isAdmin = isAdmin,
+                loadPickCounts = { viewModel.loadGlobalPicks() },
                 onSignOut = { viewModel.signOut() },
                 onDeleteAccount = {
                     viewModel.deleteAccount { result ->

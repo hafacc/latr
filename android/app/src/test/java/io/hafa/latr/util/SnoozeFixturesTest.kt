@@ -93,6 +93,31 @@ class SnoozeFixturesTest {
             val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>) }
             val actual = SnoozeSuggestions.rank(partitions, instant(case["now"]), zone).map { it.key }
             assertEquals("${case["name"]}", case["expectKeys"], actual)
+            val deep = SnoozeSuggestions.rankDeep(partitions, instant(case["now"]), zone)
+            assertEquals("${case["name"]}: via deep", case["expectKeys"], SnoozeSuggestions.shownRows(deep).map { it.key })
+        }
+    }
+
+    @Test
+    fun rankDeep() {
+        for (case in Fixtures.cases("rankDeep")) {
+            val name = case["name"]
+            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>) }
+            val deep = SnoozeSuggestions.rankDeep(partitions, instant(case["now"]), zone)
+            assertEquals("$name", case["expectKeys"], deep.map { it.key })
+            assertEquals("$name: shown", case["expectShownKeys"], SnoozeSuggestions.shownRows(deep).map { it.key })
+            val shown = SnoozeSuggestions.rank(partitions, instant(case["now"]), zone).map { it.key }
+            assertEquals("$name: rank", case["expectShownKeys"], shown)
+        }
+    }
+
+    @Test
+    fun pickLog() {
+        for (case in Fixtures.cases("pickLog")) {
+            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>) }
+            val deep = SnoozeSuggestions.rankDeep(partitions, instant(case["now"]), zone)
+            val actual = SnoozeSuggestions.pickLogKey(deep, epoch(case["target"]))
+            assertEquals("${case["name"]}", case["expect"], actual)
         }
     }
 

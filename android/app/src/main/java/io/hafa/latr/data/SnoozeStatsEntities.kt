@@ -22,6 +22,13 @@ data class SnoozeTodEntity(
     val t: Long,
 )
 
+/** A lifetime count of committed snoozes per pick log key, "1".."20" or "none". */
+@Entity(tableName = "snooze_picks")
+data class SnoozePickEntity(
+    @PrimaryKey val pick: String,
+    val n: Long,
+)
+
 @Dao
 interface SnoozeStatsDao {
     @Query("SELECT * FROM snooze_sets")
@@ -29,6 +36,18 @@ interface SnoozeStatsDao {
 
     @Query("SELECT * FROM snooze_tod")
     suspend fun getAllTod(): List<SnoozeTodEntity>
+
+    @Query("SELECT * FROM snooze_picks")
+    suspend fun getAllPicks(): List<SnoozePickEntity>
+
+    @Upsert
+    suspend fun upsertPick(entity: SnoozePickEntity)
+
+    @Query("DELETE FROM snooze_picks WHERE pick = :pick")
+    suspend fun deletePick(pick: String)
+
+    @Query("DELETE FROM snooze_picks")
+    suspend fun clearPicks()
 
     @Upsert
     suspend fun upsertSet(entity: SnoozeSetEntity)
@@ -55,16 +74,21 @@ interface SnoozeStatsDao {
         setDelete: String?,
         todUpsert: SnoozeTodEntity?,
         todDelete: String?,
+        pickUpsert: SnoozePickEntity?,
+        pickDelete: String?,
     ) {
         setUpsert?.let { upsertSet(it) }
         setDelete?.let { deleteSet(it) }
         todUpsert?.let { upsertTod(it) }
         todDelete?.let { deleteTod(it) }
+        pickUpsert?.let { upsertPick(it) }
+        pickDelete?.let { deletePick(it) }
     }
 
     @Transaction
     suspend fun clearAll() {
         clearSets()
         clearTod()
+        clearPicks()
     }
 }

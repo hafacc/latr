@@ -57,6 +57,10 @@ class AuthManager(
         Unit
     }.onFailure { Log.e(TAG, "Reauthentication failed", it) }
 
+    suspend fun isAdmin(): Boolean = runCatching {
+        auth.currentUser?.getIdToken(false)?.await()?.claims?.get("admin") == true
+    }.onFailure { Log.w(TAG, "ID token read failed", it) }.getOrDefault(false)
+
     fun signOut() {
         auth.signOut()
     }
