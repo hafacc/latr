@@ -18,7 +18,11 @@ import Sidebar from "../components/sidebar";
 import type { TextEditorHandle } from "../components/text-editor";
 import TodoList, { ListSkeleton } from "../components/todo-list";
 import UndoSnackbar from "../components/undo-snackbar";
-import { isEditableTarget } from "../utils/keyboard";
+import {
+  hasModifier,
+  isCommandChord,
+  isEditableTarget,
+} from "../utils/keyboard";
 import { useTodos } from "../utils/store";
 import {
   FILTERS,
@@ -68,7 +72,7 @@ export default function Page(): ReactElement {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "/") return;
+      if (e.key !== "/" || hasModifier(e)) return;
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
       searchRef.current?.focus();
@@ -87,7 +91,7 @@ export default function Page(): ReactElement {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (isEditableTarget(e.target)) return;
+      if (isEditableTarget(e.target) || hasModifier(e)) return;
       const idx = Number.parseInt(e.key, 10);
       if (idx >= 1 && idx <= FILTERS.length) {
         e.preventDefault();
@@ -100,30 +104,35 @@ export default function Page(): ReactElement {
 
   useEffect(() => {
     // ⌘/Ctrl+key dispatches the focused (or hovered) row's data-action on keydown; e.repeat filters auto-repeat.
-    // Backspace (not X) so ⌘+X stays as cut.
-    const SHORTCUTS: Record<string, string> = {
-      d: "primary",
-      s: "snooze",
-      u: "unsnooze",
-      backspace: "delete",
+    // Actions are tried in order, so S unsnoozes a snoozed row and snoozes any other.
+    const SHORTCUTS: Record<string, string[]> = {
+      d: ["primary"],
+      s: ["unsnooze", "snooze"],
+      k: ["pin"],
+      backspace: ["delete"],
     };
-    function matchShortcut(e: KeyboardEvent): string | null {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return null;
+    function matchShortcut(e: KeyboardEvent): string[] | null {
+      if (!isCommandChord(e) || e.shiftKey || e.altKey) return null;
       return SHORTCUTS[e.key.toLowerCase()] ?? null;
     }
     function onKeyDown(e: KeyboardEvent) {
-      const action = matchShortcut(e);
-      if (!action) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.repeat) return;
+      const actions = matchShortcut(e);
+      if (!actions) return;
+      // In a text box ⌘⌫ deletes the line, so delete only reaches a hovered row.
+      if (actions.includes("delete") && isEditableTarget(e.target)) return;
       const row = focusId
         ? document.querySelector(`[data-todo-id="${focusId}"]`)
         : document.querySelector("[data-todo-id]:hover");
-      const btn = row?.querySelector<HTMLButtonElement>(
-        `[data-action="${action}"]`,
-      );
-      btn?.click();
+      const btn = actions
+        .map((action) =>
+          row?.querySelector<HTMLButtonElement>(`[data-action="${action}"]`),
+        )
+        .find(Boolean);
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      btn.click();
     }
     // Capture phase so we run before descendant listeners and before the
     // browser's default action fires.
@@ -139,7 +148,7 @@ export default function Page(): ReactElement {
     // beats the browser's native undo of an unrelated edit.
     if (!lastUndo) return;
     function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (!isCommandChord(e) || e.shiftKey || e.altKey) return;
       if (e.key.toLowerCase() !== "z") return;
       e.preventDefault();
       e.stopPropagation();
@@ -153,7 +162,7 @@ export default function Page(): ReactElement {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (hasModifier(e)) return;
       const target = e.target as HTMLElement | null;
       const row = target?.closest<HTMLElement>("[data-todo-id]");
       const rows = Array.from(

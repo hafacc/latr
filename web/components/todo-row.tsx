@@ -538,7 +538,7 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
                 <LuUndo2
                   className={`w-4 h-4 ${showHints ? "invisible" : ""}`}
                 />
-                {showHints && <Hint>U</Hint>}
+                {showHints && <Hint>S</Hint>}
               </button>
             )}
 
@@ -555,9 +555,9 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
                   className={`${actionButton} text-text-secondary`}
                 >
                   <LuClock
-                    className={`w-4 h-4 ${showHints ? "invisible" : ""}`}
+                    className={`w-4 h-4 ${showHints && !isActivelySnoozed ? "invisible" : ""}`}
                   />
-                  {showHints && <Hint>S</Hint>}
+                  {showHints && !isActivelySnoozed && <Hint>S</Hint>}
                 </button>
                 {snoozeOpen && <SnoozePopover {...menuProps} />}
               </div>
@@ -578,7 +578,8 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
                   todo.pinned ? "text-accent" : "text-text-secondary"
                 }`}
               >
-                <LuPin className="w-4 h-4" />
+                <LuPin className={`w-4 h-4 ${showHints ? "invisible" : ""}`} />
+                {showHints && <Hint>K</Hint>}
               </button>
             )}
 
@@ -590,8 +591,10 @@ export default function TodoRow({ todo }: { todo: Todo }): ReactElement {
               title="Delete"
               className={`${actionButton} text-text-secondary hover:text-danger ${hoverAction}`}
             >
-              <LuTrash2 className={`w-4 h-4 ${showHints ? "invisible" : ""}`} />
-              {showHints && <Hint>⌫</Hint>}
+              <LuTrash2
+                className={`w-4 h-4 ${showHints && !focused ? "invisible" : ""}`}
+              />
+              {showHints && !focused && <Hint>⌫</Hint>}
             </button>
           </div>
         )}

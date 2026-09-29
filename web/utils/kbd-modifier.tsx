@@ -9,11 +9,9 @@ import {
   useState,
 } from "react";
 
-const Ctx = createContext(false);
+import { isMacPlatform } from "./keyboard";
 
-export function isMacPlatform(): boolean {
-  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
-}
+const Ctx = createContext(false);
 
 /** Tracks whether the platform command modifier (⌘/Ctrl) is held. */
 export function ModifierProvider({
