@@ -12,7 +12,7 @@ import {
 // Public Firebase web config; access is enforced by Firestore rules. Replace when forking.
 const firebaseConfig = {
   apiKey: "AIzaSyBmNn_yskTFD7Fk81mfSg3XYwSP-gMWRKI",
-  authDomain: "hafaio-latr.firebaseapp.com",
+  authDomain: "auth.latr.hafa.cc",
   projectId: "hafaio-latr",
   storageBucket: "hafaio-latr.firebasestorage.app",
   messagingSenderId: "598050986641",
