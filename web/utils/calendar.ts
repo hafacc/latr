@@ -19,14 +19,14 @@ export function parseYmd(ymd: string): Date {
   return new Date(y, m - 1, d);
 }
 
-/** Monday-first weeks covering `month` (0-based) of `year`, padded with neighbouring days. */
+/** Sunday-first weeks covering `month` (0-based) of `year`, padded with neighbouring days. */
 export function monthGrid(
   year: number,
   month: number,
   today: Date,
 ): CalendarDay[] {
   const first = new Date(year, month, 1);
-  const lead = (first.getDay() + 6) % 7;
+  const lead = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells = Math.ceil((lead + daysInMonth) / 7) * 7;
   const todayYmd = toYmd(today);
@@ -52,7 +52,7 @@ export function monthLabel(year: number, month: number): string {
   }).format(new Date(year, month, 1));
 }
 
-export const WEEKDAY_SHORT = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+export const WEEKDAY_SHORT = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 /** Parses a 24-hour time typed as "9", "930", "09:30" or "21:05" into minutes after midnight. */
 export function parseClockInput(raw: string): number | null {

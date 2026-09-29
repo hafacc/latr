@@ -8,12 +8,12 @@ import {
   toYmd,
 } from "./calendar";
 
-test("September 2026 starts on a Tuesday and fills whole Monday-first weeks", () => {
+test("September 2026 starts on a Tuesday and fills whole Sunday-first weeks", () => {
   const grid = monthGrid(2026, 8, new Date(2026, 8, 22));
   expect(grid).toHaveLength(35);
-  expect(grid[0]).toMatchObject({ ymd: "2026-08-31", inMonth: false });
-  expect(grid[1]).toMatchObject({ ymd: "2026-09-01", day: 1, inMonth: true });
-  expect(grid[34]).toMatchObject({ ymd: "2026-10-04", inMonth: false });
+  expect(grid[0]).toMatchObject({ ymd: "2026-08-30", inMonth: false });
+  expect(grid[2]).toMatchObject({ ymd: "2026-09-01", day: 1, inMonth: true });
+  expect(grid[34]).toMatchObject({ ymd: "2026-10-03", inMonth: false });
 });
 
 test("marks today and the days before it", () => {
@@ -24,9 +24,9 @@ test("marks today and the days before it", () => {
   expect(grid.find((c) => c.ymd === "2026-09-22")?.past).toBe(false);
 });
 
-test("a month starting on Monday has no leading days", () => {
-  const grid = monthGrid(2026, 5, new Date(2026, 0, 1));
-  expect(grid[0].ymd).toBe("2026-06-01");
+test("a month starting on Sunday has no leading days", () => {
+  const grid = monthGrid(2026, 1, new Date(2026, 0, 1));
+  expect(grid[0].ymd).toBe("2026-02-01");
 });
 
 test("ymd round-trips", () => {
