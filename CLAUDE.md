@@ -74,7 +74,7 @@ Track features and behavior here. When making changes, verify existing behavior 
 - The web app is an installable PWA that opens with no connection. `app/manifest.ts` is the manifest (base-path aware); icons are `public/icon-{192,512}.png` (the favicon glyph on transparent) and `app/apple-icon.png` (the same on the page background, since iOS fills transparency with black).
 - `bun export` runs `scripts/build-sw.ts` after `next build`: it writes `out/sw.js` from `scripts/sw.js`, prepending the list of built files and a version hashed from them. The worker saves every listed file on install (one missing file fails the install, so dotfiles, `.txt` and 404 pages are skipped), serves them cache-first, and answers every in-scope navigation with the saved page. Todo data offline is Firestore's persistent cache / localStorage, not the worker.
 - Updates never apply silently: a new worker waits, the undo-snackbar slot shows "New version · Reload" with a close button (when no undo is showing; closing hides it until the next new version), and Reload tells it to take over and reloads the page. The page checks for a new version whenever it becomes visible. The worker is only registered in production builds, so `bun dev` is unaffected.
-- "Install app" sits in the account menu (`InstallRow` in `auth-menu.tsx`, state in `utils/pwa.tsx`): it opens the browser's install prompt where one exists (Chrome/Edge), shows "Tap Share, then Add to Home Screen" in iOS Safari, and is hidden otherwise or once installed. Google sign-in from an installed iOS home-screen app can fail; signing in once in Safari first works around it.
+- "Install app" sits in the account menu (`InstallRow` in `auth-menu.tsx`, state in `utils/pwa.tsx`): it opens the browser's install prompt where one exists (Chrome/Edge), shows "Tap Share, then Add to Home Screen" in iOS Safari, and is hidden otherwise or once installed. Sign-in runs through `auth.latr.hafa.cc` (the `authDomain` in `utils/firebase.ts`, a Firebase Hosting custom domain), the same site as the app, so it works from an installed iOS home-screen app, which blocks storage for a sign-in helper on another site.
 
 ### Snooze is derived
 - **`state` is only `ACTIVE` or `DONE`.** Snoozed-ness is not stored — it is computed from the clock: a todo is snoozed iff it isn't done and `snoozeUntil` is still in the future (web `isSnoozed` in `utils/todo.ts`, Android `Todo.isSnoozed(nowMillis)` in `TodoFilter.kt`). Snoozing writes `snoozeUntil`; nothing writes a state to say "this is snoozed", and **nothing writes anything when a snooze lapses**.
@@ -139,7 +139,7 @@ There is no `SNOOZED` state — see [Snooze is derived](#snooze-is-derived). Doc
 
 GitHub Pages via `.github/workflows/web.yml`. Triggers: manual (`workflow_dispatch`) or a GitHub Release being published. The workflow runs `bun export` and uploads `web/out` as a Pages artifact, served at the root of the custom domain `latr.hafa.cc` (set in the repo's Pages settings; `NEXT_PUBLIC_BASE_PATH` is only for serving from a subpath).
 
-For sign-in to work on the deployed URL, the domain must be on Firebase's Authorized Domains list (Authentication → Settings).
+For sign-in to work on the deployed URL, both `latr.hafa.cc` and `auth.latr.hafa.cc` must be on Firebase's Authorized Domains list (Authentication → Settings), and `https://auth.latr.hafa.cc/__/auth/handler` must be an authorized redirect URI on the Google OAuth client.
 
 ## Design decisions
 
