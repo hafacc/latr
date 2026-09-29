@@ -1,6 +1,7 @@
 import {
   type DevicePartition,
   KEY_RE,
+  PICK_RE,
   type SetEntry,
   SLOT_RE,
   splitSetId,
@@ -11,6 +12,7 @@ export type WirePartition = {
   sets: DevicePartition["sets"];
   tod: DevicePartition["tod"];
   lastCustom: DevicePartition["lastCustom"];
+  picks: DevicePartition["picks"];
 };
 
 function isRecord(raw: unknown): raw is Record<string, unknown> {
@@ -44,11 +46,27 @@ function normalizeLastCustom(raw: unknown): DevicePartition["lastCustom"] {
   return null;
 }
 
+function normalizePicks(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!isRecord(raw)) return out;
+  for (const [key, count] of Object.entries(raw)) {
+    if (
+      PICK_RE.test(key) &&
+      Number.isSafeInteger(count) &&
+      (count as number) > 0
+    ) {
+      out[key] = count as number;
+    }
+  }
+  return out;
+}
+
 export function toWire(partition: DevicePartition): WirePartition {
   return {
     sets: partition.sets,
     tod: partition.tod,
     lastCustom: partition.lastCustom ?? null,
+    picks: partition.picks,
   };
 }
 
@@ -62,5 +80,6 @@ export function fromWire(deviceId: string, raw: unknown): DevicePartition {
     ),
     tod: normalizeCounters(record.tod, (slot) => SLOT_RE.test(slot)),
     lastCustom: normalizeLastCustom(record.lastCustom),
+    picks: normalizePicks(record.picks),
   };
 }

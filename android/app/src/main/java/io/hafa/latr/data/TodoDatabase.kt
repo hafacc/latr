@@ -32,8 +32,8 @@ class Converters {
 }
 
 @Database(
-    entities = [Todo::class, SnoozeSetEntity::class, SnoozeTodEntity::class],
-    version = 11,
+    entities = [Todo::class, SnoozeSetEntity::class, SnoozeTodEntity::class, SnoozePickEntity::class],
+    version = 12,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -73,6 +73,12 @@ abstract class TodoDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS snooze_picks (pick TEXT NOT NULL PRIMARY KEY, n INTEGER NOT NULL)")
+            }
+        }
+
         // v9: serverModifiedAt → nullable (Timestamp via Converter); destructive.
         fun getDatabase(context: Context): TodoDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -81,7 +87,7 @@ abstract class TodoDatabase : RoomDatabase() {
                     TodoDatabase::class.java,
                     "todo_database"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11, MIGRATION_11_12)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance

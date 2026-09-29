@@ -18,5 +18,24 @@ service cloud.firestore {
               || request.resource.data.serverModifiedAt >= resource.data.serverModifiedAt);
       }
     }
+
+    // Global pick-rank tally: write-only, one field moved by exactly ±1 per write.
+    // `key` names that field, since rules can't pull it out of affectedKeys().
+    match /snoozePickLog/{docId} {
+      function validBump(before) {
+        let k = request.resource.data.key;
+        let changed = request.resource.data.diff(before).affectedKeys();
+        return k is string
+          && k.matches('[1-9]|1[0-9]|20|none')
+          && changed.hasOnly([k, 'key'])
+          && changed.hasAny([k])
+          && request.resource.data[k] is int
+          && (request.resource.data[k] == before.get(k, 0) + 1
+              || request.resource.data[k] == before.get(k, 0) - 1);
+      }
+
+      allow create: if request.auth != null && docId == 'global' && validBump({});
+      allow update: if request.auth != null && docId == 'global' && validBump(resource.data);
+    }
   }
 }

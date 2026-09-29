@@ -12,6 +12,7 @@ object SnoozeStatsWire {
         "sets" to snapshot.sets.mapValues { (_, s) -> counterToWire(s) },
         "tod" to snapshot.tod.mapValues { (_, s) -> counterToWire(s) },
         "lastCustom" to snapshot.lastCustom?.let { mapOf("target" to it.target, "at" to it.at) },
+        "picks" to snapshot.picks,
     )
 
     /** Drops anything malformed, including sets from builds with an older key grammar. */
@@ -24,8 +25,19 @@ object SnoozeStatsWire {
             val at = finite(it["at"])
             if (target != null && at != null) LastCustom(target.toLong(), at.toLong()) else null
         }
-        return SnoozeStatsSnapshot(sets, tod, lastCustom)
+        return SnoozeStatsSnapshot(sets, tod, lastCustom, picks(raw["picks"]))
     }
+
+    /** Positive whole counts under valid pick log keys only. */
+    private fun picks(raw: Any?): Map<String, Long> =
+        entries(raw).mapNotNull { (k, v) ->
+            val count = finite(v) ?: return@mapNotNull null
+            if (!SnoozeSuggestions.PICK_RE.matches(k) || count < 1 || count > MAX_SAFE_INTEGER || count % 1.0 != 0.0) {
+                null
+            } else {
+                k to count.toLong()
+            }
+        }.toMap()
 
     private fun counterToWire(s: SetStat): Map<String, Any> = mapOf("c" to s.c, "t" to s.t)
 
@@ -42,4 +54,7 @@ object SnoozeStatsWire {
         (raw as? Map<*, *>)?.entries?.mapNotNull { (k, v) -> (k as? String)?.let { it to v } } ?: emptyList()
 
     private fun finite(raw: Any?): Double? = (raw as? Number)?.toDouble()?.takeIf { it.isFinite() }
+
+    // Matches web's Number.isSafeInteger.
+    private const val MAX_SAFE_INTEGER = 9_007_199_254_740_991.0
 }

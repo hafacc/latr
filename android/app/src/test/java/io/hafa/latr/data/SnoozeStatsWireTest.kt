@@ -16,14 +16,15 @@ class SnoozeStatsWireTest {
             sets = mapOf("D1@0900__Wd4@0900" to SetStat(1.5, 10L), "D0_h3" to SetStat(1.0, 20L)),
             tod = mapOf("0900" to SetStat(2.0, 30L)),
             lastCustom = LastCustom(100L, 40L),
+            picks = mapOf("1" to 3L, "none" to 1L),
         )
         assertEquals(snapshot, SnoozeStatsWire.fromWire(SnoozeStatsWire.toWire(snapshot)))
     }
 
     @Test
-    fun `the wire form has exactly sets, tod and lastCustom`() {
+    fun `the wire form has exactly sets, tod, lastCustom and picks`() {
         val wire = SnoozeStatsWire.toWire(SnoozeStatsSnapshot())
-        assertEquals(setOf("sets", "tod", "lastCustom"), wire.keys)
+        assertEquals(setOf("sets", "tod", "lastCustom", "picks"), wire.keys)
         assertFalse("deviceId" in wire)
         assertNull(wire["lastCustom"])
     }
@@ -55,6 +56,12 @@ class SnoozeStatsWireTest {
             ),
             SnoozeStatsWire.fromWire(raw),
         )
+    }
+
+    @Test
+    fun `Firestore longs and whole doubles both read as pick counts`() {
+        val raw = mapOf("picks" to mapOf("1" to 2L, "7" to 3.0, "2" to 2.5, "3" to Double.NaN, "none" to 0L, "m1" to 1L))
+        assertEquals(mapOf("1" to 2L, "7" to 3L), SnoozeStatsWire.fromWire(raw).picks)
     }
 
     @Test

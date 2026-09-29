@@ -502,6 +502,7 @@ fun TodoScreen(
     val focusId by viewModel.focusId.collectAsState()
     val fastCreationId by viewModel.fastCreationId.collectAsState()
     val snoozePartitions by viewModel.snoozePartitions.collectAsState()
+    val snoozePickLog by viewModel.snoozePickLog.collectAsState()
 
     val undoVisible by viewModel.undoVisible.collectAsState()
     val undoLabel by viewModel.undoLabel.collectAsState()
@@ -547,8 +548,10 @@ fun TodoScreen(
                 showSnoozeSheet = false
                 todoToSnooze = null
             },
-            onSnoozeSelected = { isoDateTime, source, pickedKey ->
-                todoToSnooze?.let { todo -> viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey) } ?: false
+            onSnoozeSelected = { isoDateTime, source, pickedKey, pickLogKey ->
+                todoToSnooze?.let { todo ->
+                    viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey, pickLogKey)
+                } ?: false
             },
             partitions = snoozePartitions,
             todoText = todoToSnooze?.text.orEmpty(),
@@ -580,6 +583,8 @@ fun TodoScreen(
         if (signedIn != null) {
             AccountBottomSheet(
                 authState = signedIn,
+                pickLogEnabled = snoozePickLog == true,
+                onPickLogChange = { viewModel.setSnoozePickLog(it) },
                 onSignOut = { viewModel.signOut() },
                 onDeleteAccount = {
                     viewModel.deleteAccount { result ->
