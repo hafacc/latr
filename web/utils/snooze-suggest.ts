@@ -9,6 +9,8 @@ const QUICK_TIMES_MAX = 4;
 const SCORE_EPS = 1e-9;
 // A key must resolve at least this far ahead of now.
 const MIN_LEAD_MS = MINUTE_MS;
+// A picked time discounts another by half its weight at this distance, less further off.
+const NEARBY_HALF_DISTANCE_MINUTES = 30;
 const LITTLE_WHILE_MAX_HOURS = 3;
 export const SHOWN_ROWS = 5;
 export const DEEP_ROWS = 20;
@@ -614,6 +616,24 @@ function sameScore(a: number, b: number): boolean {
   return Math.abs(a - b) <= SCORE_EPS * Math.max(1, Math.abs(a), Math.abs(b));
 }
 
+/** How much a pick of `weight` discounts a time `distanceMinutes` away from it. */
+function nearbyDiscount(weight: number, distanceMinutes: number): number {
+  return (
+    weight * 2 ** (-Math.abs(distanceMinutes) / NEARBY_HALF_DISTANCE_MINUTES)
+  );
+}
+
+/** Whether `a` beats `b`: higher discounted score, then higher undiscounted score, then `tie`. */
+function outranks(
+  a: { net: number; score: number },
+  b: { net: number; score: number },
+  tie: () => boolean,
+): boolean {
+  if (!sameScore(a.net, b.net)) return a.net > b.net;
+  if (!sameScore(a.score, b.score)) return a.score > b.score;
+  return tie();
+}
+
 /** The day count of the one D-rule key among `keys`, or null unless there is exactly one. */
 function dayCountOf(keys: string[]): number | null {
   const counts = keys
@@ -649,7 +669,7 @@ function liveMembers(setId: string): string[] {
   return offsetsFit ? keys : timed;
 }
 
-/** Rows in greedy selection order, so a row's index is its rank; the menu shows the first SHOWN_ROWS (see `rank`). */
+/** Rows in greedy selection order (each pick discounts keys near its time), so a row's index is its rank; the menu shows the first SHOWN_ROWS (see `rank`). */
 export function rankDeep(
   partitions: DevicePartition[],
   now: number,
@@ -676,6 +696,7 @@ export function rankDeep(
   }
 
   const available = new Set(liveSets.keys());
+  const discounts = new Map<string, number>();
   const rows: Row[] = [];
 
   while (rows.length < n) {
@@ -688,21 +709,30 @@ export function rankDeep(
       }
     }
 
-    let best: (Candidate & { score: number }) | null = null;
+    let best: (Candidate & { score: number; net: number }) | null = null;
     for (const [key, score] of agg) {
       if (score <= floor) continue;
-      const candidate = { key, score, time: resolved.get(key) ?? 0 };
+      const net = Math.max(0, score - (discounts.get(key) ?? 0));
+      const candidate = { key, score, net, time: resolved.get(key) ?? 0 };
+      const current = best;
       if (
-        !best ||
-        (sameScore(score, best.score)
-          ? betterTie(candidate, best, nowDate)
-          : score > best.score)
+        !current ||
+        outranks(candidate, current, () =>
+          betterTie(candidate, current, nowDate),
+        )
       ) {
         best = candidate;
       }
     }
     if (!best) break;
     const bestTime = best.time;
+    for (const [key, time] of resolved) {
+      const discount = nearbyDiscount(
+        best.score,
+        (time - bestTime) / MINUTE_MS,
+      );
+      discounts.set(key, (discounts.get(key) ?? 0) + discount);
+    }
 
     const spent = new Set([best.key]);
     for (const [key] of agg) {
@@ -780,7 +810,7 @@ export type QuickTime = {
   weight: number;
 };
 
-/** Up to four learned clock times, strongest first, returned in clock order. */
+/** Up to four learned clock times, picked greedily with the same nearby discount as rows, returned in clock order. */
 export function quickTimes(
   partitions: DevicePartition[],
   now: number,
@@ -795,22 +825,39 @@ export function quickTimes(
     }
   }
   const sinceDayStart = (clock: number) => (clock - 300 + 1440) % 1440;
+  const discounts = new Map<number, number>();
   const out: QuickTime[] = [];
   while (out.length < QUICK_TIMES_MAX) {
-    let best: QuickTime | null = null;
+    let best: (QuickTime & { score: number; net: number }) | null = null;
     for (const [clockMinutes, weight] of weights) {
+      if (weight <= floor) continue;
+      const net = Math.max(0, weight - (discounts.get(clockMinutes) ?? 0));
+      const candidate = { clockMinutes, weight, score: weight, net };
+      const current = best;
       if (
-        !best ||
-        (sameScore(weight, best.weight)
-          ? sinceDayStart(clockMinutes) < sinceDayStart(best.clockMinutes)
-          : weight > best.weight)
+        !current ||
+        outranks(
+          candidate,
+          current,
+          () =>
+            sinceDayStart(clockMinutes) < sinceDayStart(current.clockMinutes),
+        )
       ) {
-        best = { clockMinutes, weight };
+        best = candidate;
       }
     }
-    if (!best || best.weight <= floor) break;
-    out.push(best);
-    weights.delete(best.clockMinutes);
+    if (!best) break;
+    const { clockMinutes: picked, weight } = best;
+    out.push({ clockMinutes: picked, weight });
+    weights.delete(picked);
+    for (const [clockMinutes] of weights) {
+      const apart = Math.abs(clockMinutes - picked);
+      const discount = nearbyDiscount(weight, Math.min(apart, 1440 - apart));
+      discounts.set(
+        clockMinutes,
+        (discounts.get(clockMinutes) ?? 0) + discount,
+      );
+    }
   }
   return out.sort((x, y) => x.clockMinutes - y.clockMinutes);
 }

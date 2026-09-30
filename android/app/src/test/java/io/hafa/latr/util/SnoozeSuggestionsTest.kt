@@ -253,7 +253,7 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `the most-used exact slot ranks first and a 5-minute neighbour is its own row`() {
+    fun `the most-used exact slot ranks first and a 5-minute neighbour gives way to its other reading`() {
         var stats = SnoozeStatsSnapshot()
         var day = LocalDateTime.of(2024, 1, 1, 10, 0)
         for (m in listOf(0, 0, 0, 5)) {
@@ -261,8 +261,7 @@ class SnoozeSuggestionsTest {
             day = day.plusDays(1)
         }
         val rows = SnoozeSuggestions.rank(listOf(stats), instant(day), zone)
-        val tomorrow = rows.filter { SnoozeSuggestions.labelDist(it.epochMillis, instant(day), zone) == 1 }
-        assertEquals(listOf("D0@0800", "D0@0805"), tomorrow.map { it.key })
+        assertEquals(listOf("D0@0800", "Wd5@0805"), rows.map { it.key })
     }
 
     @Test
@@ -399,7 +398,7 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `quick times pick the four most used slots, shown in clock order`() {
+    fun `quick times pick the four strongest slots, discounting near neighbours, shown in clock order`() {
         val now = instant(LocalDateTime.of(2026, 9, 21, 12, 0))
         val t = now.toEpochMilli()
         val tod = mapOf(
@@ -411,7 +410,7 @@ class SnoozeSuggestionsTest {
             "0030" to SetStat(0.5, t),
         )
         val picked = SnoozeSuggestions.quickTimes(listOf(SnoozeStatsSnapshot(tod = tod)), now)
-        assertEquals(listOf(9 * 60, 9 * 60 + 5, 14 * 60, 20 * 60), picked.map { it.clockMinutes })
+        assertEquals(listOf(9 * 60, 14 * 60, 20 * 60, 23 * 60), picked.map { it.clockMinutes })
     }
 
     @Test

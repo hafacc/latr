@@ -62,6 +62,8 @@ object SnoozeSuggestions {
     private const val SCORE_EPS = 1e-9
     // A key must resolve at least this far ahead of now.
     private const val MIN_LEAD_MS = 60_000L
+    // A picked time discounts another by half its weight at this distance, less further off.
+    private const val NEARBY_HALF_DISTANCE_MINUTES = 30.0
     private const val LITTLE_WHILE_MAX_HOURS = 3
     const val SHOWN_ROWS = 5
     const val DEEP_ROWS = 20
@@ -398,7 +400,7 @@ object SnoozeSuggestions {
         return if (index >= 0) "${index + 1}" else "none"
     }
 
-    /** Greedy: take the key with the most live support, spend every set backing it or a key at the same time, repeat. Rows stay in selection order, so a row's index is its rank. */
+    /** Greedy: take the key with the most live support less its nearby discount, spend every set backing it or a key at the same time, discount keys near it, repeat. Rows stay in selection order, so a row's index is its rank. */
     fun rankDeep(
         partitions: List<SnoozeStatsSnapshot>,
         now: Instant,
@@ -427,28 +429,32 @@ object SnoozeSuggestions {
 
         val rows = mutableListOf<SnoozeRow>()
         val settled = mutableSetOf<PatternKey>()
+        val discounts = mutableMapOf<PatternKey, Double>()
         while (rows.size < n) {
             var best: PatternKey? = null
             var bestScore = 0.0
+            var bestNet = 0.0
             for ((key, time) in resolved) {
                 if (key in settled) continue
                 val agg = available.filter { key in membersById.getValue(it) }.sumOf { liveById.getValue(it) }
                 if (agg <= floor) continue
-                val better = if (best == null) {
-                    true
-                } else if (sameScore(agg, bestScore)) {
-                    tieBreak(key, time, best, resolved.getValue(best), now, zone) < 0
-                } else {
-                    agg > bestScore
+                val net = maxOf(0.0, agg - (discounts[key] ?: 0.0))
+                val current = best
+                val better = current == null || outranks(net, agg, bestNet, bestScore) {
+                    tieBreak(key, time, current, resolved.getValue(current), now, zone) < 0
                 }
                 if (better) {
                     best = key
                     bestScore = agg
+                    bestNet = net
                 }
             }
             if (best == null) break
             val pickedKey = best
             val pickedTime = resolved.getValue(pickedKey)
+            for ((key, time) in resolved) {
+                discounts[key] = (discounts[key] ?: 0.0) + nearbyDiscount(bestScore, (time - pickedTime) / 60_000.0)
+            }
             val absorbed = resolved.keys.filter {
                 it != pickedKey && it !in settled && resolved.getValue(it) == pickedTime
             }
@@ -490,6 +496,17 @@ object SnoozeSuggestions {
     // Both platforms sum doubles in different orders, so an exact == could pick different winners.
     private fun sameScore(a: Double, b: Double): Boolean =
         Math.abs(a - b) <= SCORE_EPS * maxOf(1.0, Math.abs(a), Math.abs(b))
+
+    /** How much a pick of [weight] discounts a time [distanceMinutes] away from it. */
+    private fun nearbyDiscount(weight: Double, distanceMinutes: Double): Double =
+        weight * 2.0.pow(-Math.abs(distanceMinutes) / NEARBY_HALF_DISTANCE_MINUTES)
+
+    /** Whether a candidate beats the best so far: higher discounted score, then higher undiscounted score, then [tie]. */
+    private inline fun outranks(net: Double, score: Double, bestNet: Double, bestScore: Double, tie: () -> Boolean): Boolean = when {
+        !sameScore(net, bestNet) -> net > bestNet
+        !sameScore(score, bestScore) -> score > bestScore
+        else -> tie()
+    }
 
     /** Negative if [a] (resolving to [aTime]) should be preferred over [b] when their aggregate scores tie. */
     private fun tieBreak(a: PatternKey, aTime: Long, b: PatternKey, bTime: Long, now: Instant, zone: ZoneId): Int {
@@ -548,7 +565,7 @@ object SnoozeSuggestions {
         error("no matching weekday for $dow in [$minDays,$maxDays]")
     }
 
-    /** Strongest slots (earliest from 05:00 on a tie), in clock order. */
+    /** Up to four slots, picked greedily with the same nearby discount as rows (earliest from 05:00 on a tie), in clock order. */
     fun quickTimes(partitions: List<SnoozeStatsSnapshot>, now: Instant, floor: Double = DEFAULT_FLOOR): List<QuickTime> {
         val nowMs = now.toEpochMilli()
         val weights = mutableMapOf<Int, Double>()
@@ -561,26 +578,30 @@ object SnoozeSuggestions {
         }
         val boundary = DAY_BOUNDARY_HOUR.toInt() * 60
         fun sinceBoundary(clock: Int) = (clock - boundary + 24 * 60) % (24 * 60)
+        val discounts = mutableMapOf<Int, Double>()
         val picked = mutableListOf<QuickTime>()
         while (picked.size < QUICK_TIMES_MAX && weights.isNotEmpty()) {
             var best: Int? = null
             var bestWeight = 0.0
+            var bestNet = 0.0
             for ((clock, w) in weights) {
-                val better = if (best == null) {
-                    true
-                } else if (sameScore(w, bestWeight)) {
-                    sinceBoundary(clock) < sinceBoundary(best)
-                } else {
-                    w > bestWeight
-                }
+                if (w <= floor) continue
+                val net = maxOf(0.0, w - (discounts[clock] ?: 0.0))
+                val current = best
+                val better = current == null || outranks(net, w, bestNet, bestWeight) { sinceBoundary(clock) < sinceBoundary(current) }
                 if (better) {
                     best = clock
                     bestWeight = w
+                    bestNet = net
                 }
             }
-            if (best == null || bestWeight <= floor) break
+            if (best == null) break
             picked += QuickTime(best, bestWeight)
             weights.remove(best)
+            for (clock in weights.keys) {
+                val apart = Math.abs(clock - best)
+                discounts[clock] = (discounts[clock] ?: 0.0) + nearbyDiscount(bestWeight, minOf(apart, 24 * 60 - apart).toDouble())
+            }
         }
         return picked.sortedBy { it.clockMinutes }
     }

@@ -119,7 +119,7 @@ describe("commit / decay", () => {
     expect(before.next.sets[setId]?.c).toBeCloseTo(1.5, 5);
   });
 
-  test("the most-used exact time ranks first and its 5-minute neighbour is its own row", () => {
+  test("the most-used exact time ranks first and its 5-minute neighbour gives way to its other reading", () => {
     let p = emptyPartition("device-a");
     p = commit(
       p,
@@ -140,7 +140,7 @@ describe("commit / decay", () => {
       "custom",
     ).next;
     const rows = rank([p], at(2024, 3, 7, 10, 0).getTime());
-    expect(rows.map((r) => r.keyId)).toEqual(["D0@0800", "D0@0805"]);
+    expect(rows.map((r) => r.keyId)).toEqual(["D0@0800", "Wd4@0805"]);
     expect(new Date(rows[0].time).getHours()).toBe(8);
     expect(new Date(rows[0].time).getMinutes()).toBe(0);
   });

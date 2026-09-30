@@ -7,10 +7,10 @@
     "resolve": "resolveKey(key, now) -> epochLocal, or null when it can't resolve more than 60s into the future.",
     "labelDist": "Label day phrase for key resolved at resolvedLocal from now. dist = max(0, snoozeDay(resolved) - calendarDate(now)); weekday = ISO weekday of snoozeDay(resolved); phrase is one of today|tomorrow|inDays|inWeeks|this|next|inTwoWeeks|calendar; family is the key's date-rule family; region (timed keys only) is the time-of-day name of the resolved time.",
     "labelOffset": "Same-day hours-offset label kind: littleWhile for up to 3 hours, muchLater beyond.",
-    "quickTimes": "quickTimes(partitions, now): each partition is a wire `tod` map; expect lists the chosen clockMinutes (minutes after local midnight) in clock order.",
+    "quickTimes": "quickTimes(partitions, now): each partition is a wire `tod` map; expect lists the chosen clockMinutes (minutes after local midnight) in clock order. Picked greedily with the same discount as rankDeep, by clock distance around midnight.",
     "rank": "rank(partitions, now): each partition is a wire partition; expectKeys are the chosen rows' keys in row (time) order.",
     "wire": "fromWire(raw) must equal normalized, and toWire(fromWire(raw)) must equal normalized. picks keeps only keys 1..20 or none with a positive integer count. A raw partition without v >= 2 was saved before clock keys counted from their first hit: each set's clock keys are resolved the old way (date rule counted from the snooze day of its t) and, if they agree on one target, the set is re-extracted from (t, target) keeping c and t; sets that land on one id merge (both decayed to the later t, summed). toWire always writes v: 2.",
-    "rankDeep": "rankDeep(partitions, now): the first 20 distinct rows in greedy selection order (a row's 1-based index is its rank). Keys spent because they land at the same time as a winner take no index. expectShownKeys are the menu's rows: the first 5, in time order.",
+    "rankDeep": "rankDeep(partitions, now): the first 20 distinct rows in greedy selection order (a row's 1-based index is its rank). After each pick every other key's score drops by the pick's score x 2^(-|minutes apart| / 30), floored at 0; the floor still applies to the undiscounted score, and equal discounted scores go to the higher undiscounted one. Keys spent because they land at the same time as a winner take no index. expectShownKeys are the menu's rows: the first 5, in time order.",
     "pickLog": "pickLogKey(rankDeep(partitions, now), target): the 1-based rank of the deep row whose time is target's minute, however it was picked, or none when no row is."
   },
   "extract": [
@@ -620,6 +620,34 @@
         }
       ],
       "expect": [480, 540, 600]
+    },
+    {
+      "name": "a weaker time next to a stronger one gives way to a distant one",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "0900": { "c": 5, "t": 1790092800000 },
+          "0905": { "c": 4, "t": 1790092800000 },
+          "1200": { "c": 3, "t": 1790092800000 },
+          "1800": { "c": 2, "t": 1790092800000 },
+          "2200": { "c": 1.5, "t": 1790092800000 }
+        }
+      ],
+      "expect": [540, 720, 1080, 1320]
+    },
+    {
+      "name": "the discount wraps around midnight",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "2350": { "c": 3, "t": 1790092800000 },
+          "0015": { "c": 2.5, "t": 1790092800000 },
+          "0900": { "c": 1, "t": 1790092800000 },
+          "1200": { "c": 1, "t": 1790092800000 },
+          "1500": { "c": 1, "t": 1790092800000 }
+        }
+      ],
+      "expect": [540, 720, 900, 1430]
     }
   ],
   "rank": [
@@ -821,6 +849,26 @@
         }
       ],
       "expectKeys": ["Wd4@0900", "Wd2@0900", "Wn2@0900"]
+    },
+    {
+      "name": "a weaker 19:00 near a 20:00 habit drops out of the menu",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@2000": { "c": 3, "t": 1790092800000 },
+            "D0@1900": { "c": 1.8, "t": 1790092800000 },
+            "D1@0900": { "c": 1.5, "t": 1790092800000 },
+            "D2@0900": { "c": 1.4, "t": 1790092800000 },
+            "D3@0900": { "c": 1.3, "t": 1790092800000 },
+            "D4@0900": { "c": 1.2, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@2000", "D1@0900", "D2@0900", "D3@0900", "D4@0900"]
     }
   ],
   "wire": [
@@ -1025,7 +1073,7 @@
   ],
   "rankDeep": [
     {
-      "name": "same-time keys take no index",
+      "name": "same-time keys take no index, and tomorrow 09:00 gives way near tomorrow 10:00",
       "now": "2026-09-22T12:00:00",
       "partitions": [
         {
@@ -1049,7 +1097,7 @@
       ],
       "expectKeys": [
         "D0@1000",
-        "Wd3@0900",
+        "D1@0900",
         "D1@2000",
         "D0@1500",
         "Wd5@0900",
@@ -1061,9 +1109,9 @@
       ],
       "expectShownKeys": [
         "D0@1500",
-        "Wd3@0900",
         "D0@1000",
         "D1@2000",
+        "D1@0900",
         "Wd5@0900"
       ]
     },
@@ -1133,6 +1181,116 @@
         "D4@0900",
         "D5@0900"
       ]
+    },
+    {
+      "name": "a weaker 19:00 near a 20:00 habit gives way to a distant time",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@2000": { "c": 3, "t": 1790092800000 },
+            "D0@1900": { "c": 2, "t": 1790092800000 },
+            "D1@0900": { "c": 1.5, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@2000", "D1@0900", "D0@1900"],
+      "expectShownKeys": ["D0@1900", "D0@2000", "D1@0900"]
+    },
+    {
+      "name": "discounts from every pick add up",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@1900": { "c": 3, "t": 1790092800000 },
+            "D0@2100": { "c": 3, "t": 1790092800000 },
+            "D0@2000": { "c": 2.9, "t": 1790092800000 },
+            "D1@0900": { "c": 1.5, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@1900", "D0@2100", "D1@0900", "D0@2000"],
+      "expectShownKeys": ["D0@1900", "D0@2000", "D0@2100", "D1@0900"]
+    },
+    {
+      "name": "equal discounted scores go to the higher undiscounted one",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@2000": { "c": 5, "t": 1790092800000 },
+            "D0@1955": { "c": 1, "t": 1790092800000 },
+            "D0@2005": { "c": 2, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@2000", "D0@2005", "D0@1955"],
+      "expectShownKeys": ["D0@1955", "D0@2000", "D0@2005"]
+    },
+    {
+      "name": "a key discounted to nothing still fills a row while it's over the floor",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@2000": { "c": 3, "t": 1790092800000 },
+            "D0@2005": { "c": 0.06, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@2000", "D0@2005"],
+      "expectShownKeys": ["D0@2000", "D0@2005"]
+    },
+    {
+      "name": "the discount reaches across midnight",
+      "now": "2026-09-22T12:00:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@2330": { "c": 3, "t": 1790092800000 },
+            "D0@0010": { "c": 1, "t": 1790092800000 },
+            "D1@0900": { "c": 0.6, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@2330", "D1@0900", "D0@0010"],
+      "expectShownKeys": ["D0@2330", "D0@0010", "D1@0900"]
+    },
+    {
+      "name": "an hour offset near a picked time is discounted too",
+      "now": "2026-09-22T12:30:00",
+      "partitions": [
+        {
+          "v": 2,
+          "sets": {
+            "D0@1400__D0_h2": { "c": 1, "t": 1790092800000 },
+            "D0@1410__D0_h2": { "c": 1, "t": 1790092800000 },
+            "D0@1420__D0_h2": { "c": 1, "t": 1790092800000 },
+            "D0@1440": { "c": 3.5, "t": 1790092800000 },
+            "D1@0900": { "c": 1, "t": 1790092800000 }
+          },
+          "tod": {},
+          "lastCustom": null
+        }
+      ],
+      "expectKeys": ["D0@1440", "D1@0900", "D0_h2"],
+      "expectShownKeys": ["D0_h2", "D0@1440", "D1@0900"]
     }
   ],
   "pickLog": [
