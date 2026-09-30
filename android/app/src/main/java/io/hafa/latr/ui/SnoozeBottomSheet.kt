@@ -9,9 +9,11 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.hafa.latr.ui.theme.LatrTheme
 import io.hafa.latr.util.LocalDateTimeUtil
 import io.hafa.latr.util.PickerDates
@@ -283,12 +286,15 @@ private fun DateStep(
                 onClick = { epoch?.let(onQuickTime) },
                 enabled = epoch != null && epoch > now.toEpochMilli(),
                 shape = MaterialTheme.shapes.small,
+                contentPadding = PaddingValues(horizontal = 4.dp),
                 modifier = Modifier.weight(1f),
             ) {
+                val timeStyle = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
                 Text(
                     LocalTime.of(quickTime.clockMinutes / 60, quickTime.clockMinutes % 60).toString(),
-                    style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum"),
+                    style = timeStyle,
                     maxLines = 1,
+                    autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = timeStyle.fontSize),
                 )
             }
         }
