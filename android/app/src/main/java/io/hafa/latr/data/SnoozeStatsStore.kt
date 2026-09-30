@@ -94,11 +94,17 @@ class SnoozeStatsStore(
         // Counters restored from a backup without their identity would double-count another device's partition.
         if (userPreferences.snoozeIdentityWasMissing) {
             dao.clearAll()
+            userPreferences.snoozeSetsVersion = SnoozeStatsWire.PARTITION_VERSION
             return SnoozeStatsSnapshot()
         }
-        val sets = dao.getAllSets()
+        var sets = dao.getAllSets()
             .filter { SnoozeSuggestions.isValidSetId(it.id) }
             .associate { it.id to SetStat(it.c, it.t) }
+        if (userPreferences.snoozeSetsVersion < SnoozeStatsWire.PARTITION_VERSION) {
+            sets = SnoozeSuggestions.upgradeLegacySets(sets, zoneProvider())
+            dao.replaceSets(sets.map { (id, s) -> SnoozeSetEntity(id, s.c, s.t) })
+            userPreferences.snoozeSetsVersion = SnoozeStatsWire.PARTITION_VERSION
+        }
         val tod = dao.getAllTod()
             .filter { SnoozeSuggestions.SLOT_RE.matches(it.slot) }
             .associate { it.slot to SetStat(it.c, it.t) }
@@ -152,7 +158,7 @@ class SnoozeStatsStore(
             val myId = deviceId
             _remote.value = raw.entries
                 .filter { (k, _) -> k is String && k != myId }
-                .associate { (k, v) -> (k as String) to SnoozeStatsWire.fromWire(v as? Map<*, *>) }
+                .associate { (k, v) -> (k as String) to SnoozeStatsWire.fromWire(v as? Map<*, *>, zoneProvider()) }
         }
     }
 

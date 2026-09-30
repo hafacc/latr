@@ -28,6 +28,7 @@ describe("snooze stats wire format (must match Android)", () => {
       "picks",
       "sets",
       "tod",
+      "v",
     ]);
     expect(wire.lastCustom).toBeNull();
   });

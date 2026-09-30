@@ -50,10 +50,10 @@ describe("extractKeys", () => {
     expect(keys).toContain("D0_h3");
   });
 
-  test("tomorrow at a fixed morning time matches D1 and the next weekday", () => {
+  test("tomorrow at a morning time already past today matches the next 08:00 and tomorrow's weekday", () => {
     // 2024-03-04 is a Monday.
     const keys = extractKeys(at(2024, 3, 4, 10, 0), at(2024, 3, 5, 8, 0));
-    expect(keys).toContain("D1@0800");
+    expect(keys).toContain("D0@0800");
     expect(keys).toContain("Wd2@0800"); // Tuesday = getDay() 2
   });
 
@@ -72,7 +72,7 @@ describe("extractKeys", () => {
 
   test("a lone far-out custom pick (17 days) is its own day count", () => {
     const keys = extractKeys(at(2024, 3, 4, 9, 0), at(2024, 3, 21, 9, 0));
-    expect(keys).toEqual(["D17@0900", "D17_h0"]);
+    expect(keys).toEqual(["D16@0900", "D17_h0"]);
   });
 
   test("the next 1st-of-month within range credits Dom1", () => {
@@ -140,7 +140,7 @@ describe("commit / decay", () => {
       "custom",
     ).next;
     const rows = rank([p], at(2024, 3, 7, 10, 0).getTime());
-    expect(rows.map((r) => r.keyId)).toEqual(["D1@0800", "D1@0805"]);
+    expect(rows.map((r) => r.keyId)).toEqual(["D0@0800", "D0@0805"]);
     expect(new Date(rows[0].time).getHours()).toBe(8);
     expect(new Date(rows[0].time).getMinutes()).toBe(0);
   });
@@ -229,7 +229,7 @@ describe("rank — Sunday -> Monday attribution (motivating example)", () => {
     expect(labelsOf(rows, now)[0]).toContain("Tomorrow");
   });
 
-  test("on a tie tomorrow beats the weekday reading, and the weekday shows once tomorrow is a different day", () => {
+  test("on a tie tomorrow beats the weekday reading, and on the day itself it's this morning", () => {
     const p = commit(
       emptyPartition("device-a"),
       at(2026, 9, 16, 15, 0).getTime(),
@@ -238,12 +238,14 @@ describe("rank — Sunday -> Monday attribution (motivating example)", () => {
     ).next;
     const wedNow = at(2026, 9, 23, 10, 0).getTime();
     const wednesday = rank([p], wedNow);
-    expect(wednesday.map((r) => r.keyId)).toEqual(["D1@0900"]);
+    expect(wednesday.map((r) => r.keyId)).toEqual(["D0@0900"]);
     expect(labelsOf(wednesday, wedNow)[0]).toBe("Tomorrow morning, 09:00");
 
-    const thursday = rank([p], at(2026, 9, 24, 7, 0).getTime());
-    expect(thursday.map((r) => r.keyId)).toEqual(["D1@0900"]);
-    expect(thursday[0].time).toBe(at(2026, 9, 25, 9, 0).getTime());
+    const thuNow = at(2026, 9, 24, 7, 0).getTime();
+    const thursday = rank([p], thuNow);
+    expect(thursday.map((r) => r.keyId)).toEqual(["D0@0900"]);
+    expect(thursday[0].time).toBe(at(2026, 9, 24, 9, 0).getTime());
+    expect(labelsOf(thursday, thuNow)[0]).toBe("This morning, 09:00");
   });
 
   test("a genuine second habit (Friday -> Monday) surfaces alongside the daily one", () => {
@@ -350,8 +352,17 @@ describe("labelFor", () => {
   };
 
   test("folds the resolved time into the label", () => {
-    expect(label("D1@0800", "2024-03-04T10:00:00")).toBe(
+    expect(label("D0@0800", "2024-03-04T10:00:00")).toBe(
       "Tomorrow morning, 08:00",
+    );
+  });
+
+  test("a time that passed today reads as tomorrow's", () => {
+    expect(label("D0@1300", "2026-09-22T15:00:00")).toBe(
+      "Tomorrow afternoon, 13:00",
+    );
+    expect(label("D1@1300", "2026-09-22T15:00:00")).toBe(
+      "This Thursday afternoon, 13:00",
     );
   });
 
@@ -361,9 +372,15 @@ describe("labelFor", () => {
     );
   });
 
-  test("the upcoming Thursday seen on a Thursday reads Next Thursday", () => {
-    expect(label("Wd4@0900", "2026-09-24T07:00:00")).toBe(
+  test("the upcoming Thursday seen on a Thursday after its time reads Next Thursday", () => {
+    expect(label("Wd4@0900", "2026-09-24T10:00:00")).toBe(
       "Next Thursday morning, 09:00",
+    );
+  });
+
+  test("the upcoming Thursday seen on a Thursday before its time reads this morning", () => {
+    expect(label("Wd4@0900", "2026-09-24T07:00:00")).toBe(
+      "This morning, 09:00",
     );
   });
 
@@ -374,18 +391,18 @@ describe("labelFor", () => {
   });
 
   test("weekday after next on its own weekday reads '<weekday> in 2 weeks'", () => {
-    expect(label("Wn4@0900", "2026-09-24T07:00:00")).toBe(
+    expect(label("Wn4@0900", "2026-09-24T10:00:00")).toBe(
       "Thursday in 2 weeks, 09:00",
     );
   });
 
-  test("tomorrow morning seen at 04:50 reads this morning", () => {
-    expect(label("D1@0900", "2026-09-23T04:50:00")).toBe("This morning, 09:00");
+  test("the next 09:00 seen at 04:50 reads this morning", () => {
+    expect(label("D0@0900", "2026-09-23T04:50:00")).toBe("This morning, 09:00");
   });
 
-  test("in a week seen at 04:50 reads the weekday", () => {
+  test("in a week seen at 04:50 counts from this morning's 09:00", () => {
     expect(label("W1@0900", "2026-09-23T04:50:00")).toBe(
-      "This Tuesday morning, 09:00",
+      "Next Wednesday morning, 09:00",
     );
   });
 
@@ -650,7 +667,7 @@ describe("quick times", () => {
     const target = local("2026-11-06T10:00:00").getTime();
     const p0 = emptyPartition("a");
     const { next, undoSnapshot } = commit(p0, atMs, target, "custom");
-    expect(next.sets).toEqual({ "D45@1000__D45_h0": { c: 1, t: atMs } });
+    expect(next.sets).toEqual({ "D44@1000__D45_h0": { c: 1, t: atMs } });
     expect(next.tod).toEqual({ "1000": { c: 1, t: atMs } });
     expect(undoCommit(next, undoSnapshot)).toEqual(p0);
   });
@@ -728,38 +745,38 @@ describe("5am day-boundary consistency (Dom/DomL/Mo vs D/W/Wd/Wn)", () => {
   test("T1: a commit between midnight and 5am matches Dom1 AND Mo1 (both read the shifted day)", () => {
     // Commit at 2026-10-02 01:00 -> shifted day is Oct 1, not Oct 2.
     const keys = extractKeys(at(2026, 10, 2, 1, 0), at(2026, 11, 1, 9, 0));
-    expect(keys.sort()).toEqual(["D31@0900", "Dom1@0900", "Mo1@0900"]);
+    expect(keys.sort()).toEqual(["D30@0900", "Dom1@0900", "Mo1@0900"]);
   });
 
   test("T2: same window, DomL and Mo1 both match a month-end target", () => {
     // Commit at 2026-11-01 02:00 -> shifted day is Oct 31.
     const keys = extractKeys(at(2026, 11, 1, 2, 0), at(2026, 11, 30, 21, 0));
-    expect(keys.sort()).toEqual(["D30@2100", "DomL@2100", "Mo1@2100"]);
+    expect(keys.sort()).toEqual(["D29@2100", "DomL@2100", "Mo1@2100"]);
   });
 
   test("T3: shifted-day reasoning can leave a pick with only its day count", () => {
-    // Commit at 2026-10-01 01:00 -> shifted day is Sep 30; Nov 1 is neither
-    // "the next 1st" nor "in a month" from Sep 30.
+    // Commit at 2026-10-01 01:00 -> shifted day is Sep 30; the next 1st at 09:00
+    // is later today, and Nov 1 isn't "in a month" from Sep 30.
     const keys = extractKeys(at(2026, 10, 1, 1, 0), at(2026, 11, 1, 9, 0));
-    expect(keys).toEqual(["D32@0900"]);
+    expect(keys).toEqual(["D31@0900"]);
   });
 
-  test("T4: the same commit made in daytime (no shift) matches Dom1 AND Mo1 too — nextDom/nextMonthEnd are strict", () => {
-    // Not in the midnight-5am window, but the anchor day itself (Oct 1) must
-    // still roll forward to next month's occurrence, not treat "today" as a match.
+  test("T4: the same commit made in daytime (no shift) matches Dom1 AND Mo1 too — today's 1st at 09:00 has passed", () => {
+    // Not in the midnight-5am window, but 09:00 on the commit day (Oct 1) has
+    // passed, so the next 1st at 09:00 is next month's.
     const keys = extractKeys(at(2026, 10, 1, 10, 0), at(2026, 11, 1, 9, 0));
-    expect(keys.sort()).toEqual(["D31@0900", "Dom1@0900", "Mo1@0900"]);
+    expect(keys.sort()).toEqual(["D30@0900", "Dom1@0900", "Mo1@0900"]);
   });
 
   test("guard: an ordinary daytime commit is unaffected by the fix", () => {
     const keys = extractKeys(at(2026, 10, 7, 10, 0), at(2026, 10, 8, 8, 0));
-    expect(keys).toContain("D1@0800");
+    expect(keys).toContain("D0@0800");
     expect(keys.filter((k) => k.startsWith("Wd"))).toHaveLength(1);
     expect(keys).toHaveLength(2);
     expect(keys.some((k) => k.includes("_h"))).toBe(false);
   });
 
-  test("resolve side: Dom1 at the anchor day itself resolves to next month, not today (T4 reverse)", () => {
+  test("resolve side: Dom1 on the 1st after its time resolves to next month, not today (T4 reverse)", () => {
     const now = at(2026, 10, 1, 10, 0);
     const time = resolveKey("Dom1@0900", now);
     expect(time).not.toBeNull();
@@ -897,7 +914,16 @@ describe("a single snooze is suggested back as that exact time, by its best name
             const dist = Math.round(
               (snoozeDayOf(target) - snoozeDayOf(commitAt)) / DAY,
             );
-            if (target.getTime() <= now + 5 * MINUTE || dist > 14) continue;
+            // Which hit of this clock time the target is, counting the first after now as 0.
+            const firstToday = new Date(target);
+            firstToday.setDate(firstToday.getDate() - dist);
+            const hit = firstToday.getTime() > now + MINUTE ? dist : dist - 1;
+            const today = new Date(now);
+            today.setHours(0, 0, 0, 0);
+            const labelDays = Math.round(
+              (snoozeDayOf(target) - today.getTime()) / DAY,
+            );
+            if (target.getTime() <= now + 5 * MINUTE || hit > 13) continue;
             const { next } = commit(
               emptyPartition("a"),
               commitAt.getTime(),
@@ -906,7 +932,7 @@ describe("a single snooze is suggested back as that exact time, by its best name
             );
             const top = rank([next], now)[0];
             const named =
-              dist >= 2 ? /^(Wd|Wn)\d/.test(top?.keyId ?? "") : true;
+              labelDays >= 2 ? /^(Wd|Wn)\d/.test(top?.keyId ?? "") : true;
             const text = top
               ? labelFor(top.keyId, top.time, new Date(now))
               : "";

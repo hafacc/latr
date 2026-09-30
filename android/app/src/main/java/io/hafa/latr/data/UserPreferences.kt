@@ -63,6 +63,13 @@ class UserPreferences(context: Context) {
             }
         }
 
+    /** The [SnoozeStatsWire.PARTITION_VERSION] this device's Room sets are in; 0 for sets saved before versions existed. */
+    var snoozeSetsVersion: Int
+        get() = snoozeIdentity.getInt(KEY_SETS_VERSION, 0)
+        set(value) {
+            snoozeIdentity.edit { putInt(KEY_SETS_VERSION, value) }
+        }
+
     /** Which account's snooze-learning history this device's local partition currently belongs to. */
     var snoozeStatsOwnerUid: String?
         get() = snoozeIdentity.getString(KEY_OWNER_UID, null)
@@ -78,6 +85,7 @@ class UserPreferences(context: Context) {
         const val KEY_OWNER_UID = "snooze_stats_owner_uid"
         const val KEY_LAST_CUSTOM_TARGET = "last_custom_target"
         const val KEY_LAST_CUSTOM_AT = "last_custom_at"
+        const val KEY_SETS_VERSION = "snooze_sets_version"
         val IDENTITY_KEYS = listOf(KEY_DEVICE_ID, KEY_OWNER_UID, KEY_LAST_CUSTOM_TARGET, KEY_LAST_CUSTOM_AT)
     }
 }

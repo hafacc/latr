@@ -4,21 +4,28 @@ import io.hafa.latr.util.LastCustom
 import io.hafa.latr.util.SetStat
 import io.hafa.latr.util.SnoozeStatsSnapshot
 import io.hafa.latr.util.SnoozeSuggestions
+import java.time.ZoneId
 
 /** One device partition as stored at `users/{uid}.snoozeStats.<deviceId>`, shared with web. */
 object SnoozeStatsWire {
 
+    // Partitions without it were saved before clock keys counted from their first hit, and are upgraded on read.
+    const val PARTITION_VERSION = 2
+
     fun toWire(snapshot: SnoozeStatsSnapshot): Map<String, Any?> = mapOf(
+        "v" to PARTITION_VERSION,
         "sets" to snapshot.sets.mapValues { (_, s) -> counterToWire(s) },
         "tod" to snapshot.tod.mapValues { (_, s) -> counterToWire(s) },
         "lastCustom" to snapshot.lastCustom?.let { mapOf("target" to it.target, "at" to it.at) },
         "picks" to snapshot.picks,
     )
 
-    /** Drops anything malformed, including sets from builds with an older key grammar. */
-    fun fromWire(raw: Map<*, *>?): SnoozeStatsSnapshot {
+    /** Drops anything malformed, including sets from builds with an older key grammar, and upgrades a pre-[PARTITION_VERSION] partition's sets. */
+    fun fromWire(raw: Map<*, *>?, zone: ZoneId = ZoneId.systemDefault()): SnoozeStatsSnapshot {
         if (raw == null) return SnoozeStatsSnapshot()
-        val sets = counters(raw["sets"]) { SnoozeSuggestions.isValidSetId(it) }
+        val parsed = counters(raw["sets"]) { SnoozeSuggestions.isValidSetId(it) }
+        val current = (finite(raw["v"]) ?: 0.0) >= PARTITION_VERSION
+        val sets = if (current) parsed else SnoozeSuggestions.upgradeLegacySets(parsed, zone)
         val tod = counters(raw["tod"]) { SnoozeSuggestions.SLOT_RE.matches(it) }
         val lastCustom = (raw["lastCustom"] as? Map<*, *>)?.let {
             val target = finite(it["target"])
