@@ -67,8 +67,8 @@ class SnoozeSuggestionsTest {
     @Test
     fun `clock slots round to 5 minutes but never across the 5am boundary`() {
         val at = LocalDateTime.of(2026, 9, 21, 10, 0)
-        assertTrue("D1@0905" in keys(at, LocalDateTime.of(2026, 9, 22, 9, 7)))
-        assertTrue("D1@0910" in keys(at, LocalDateTime.of(2026, 9, 22, 9, 8)))
+        assertTrue("D0@0905" in keys(at, LocalDateTime.of(2026, 9, 22, 9, 7)))
+        assertTrue("D0@0910" in keys(at, LocalDateTime.of(2026, 9, 22, 9, 8)))
         assertTrue("D1@0455" in keys(at, LocalDateTime.of(2026, 9, 23, 4, 58)))
     }
 
@@ -76,7 +76,7 @@ class SnoozeSuggestionsTest {
     fun `a commit made 00-05 gets offset keys that agree with its timed keys about the day`() {
         val at = LocalDateTime.of(2024, 1, 8, 1, 0)
         assertEquals(DayOfWeek.MONDAY, at.dayOfWeek)
-        assertEquals(setOf("D1@0100", "Wd1@0100", "D1_h0", "Wd1_h0"), keys(at, at.plusDays(1)))
+        assertEquals(setOf("D0@0100", "Wd1@0100", "D1_h0", "Wd1_h0"), keys(at, at.plusDays(1)))
     }
 
     @Test
@@ -92,7 +92,7 @@ class SnoozeSuggestionsTest {
     @Test
     fun `a daytime commit gets no offset keys when the gap rounds negative`() {
         assertEquals(
-            setOf("D1@0800", "Wd2@0800"),
+            setOf("D0@0800", "Wd2@0800"),
             keys(LocalDateTime.of(2024, 1, 1, 10, 0), LocalDateTime.of(2024, 1, 2, 8, 0)),
         )
     }
@@ -262,7 +262,7 @@ class SnoozeSuggestionsTest {
         }
         val rows = SnoozeSuggestions.rank(listOf(stats), instant(day), zone)
         val tomorrow = rows.filter { SnoozeSuggestions.labelDist(it.epochMillis, instant(day), zone) == 1 }
-        assertEquals(listOf("D1@0800", "D1@0805"), tomorrow.map { it.key })
+        assertEquals(listOf("D0@0800", "D0@0805"), tomorrow.map { it.key })
     }
 
     @Test
@@ -276,23 +276,24 @@ class SnoozeSuggestionsTest {
         }
         val rows = SnoozeSuggestions.rank(listOf(stats), instant(day), zone)
         val keys = rows.map { it.key }
-        assertTrue("got $keys", "D1@0900" in keys && "D1@2000" in keys)
+        assertTrue("got $keys", "D0@0900" in keys && "D1@2000" in keys)
     }
 
     @Test
-    fun `on a tie tomorrow beats the weekday reading, and the weekday shows once tomorrow is a different day`() {
+    fun `on a tie tomorrow beats the weekday reading, and on the day itself it's this morning`() {
         val stats = commitOnce(
             SnoozeStatsSnapshot(),
             LocalDateTime.of(2026, 9, 16, 15, 0),
             LocalDateTime.of(2026, 9, 17, 9, 0),
         ).next
         val wednesday = SnoozeSuggestions.rank(listOf(stats), instant(LocalDateTime.of(2026, 9, 23, 10, 0)), zone)
-        assertEquals(listOf("D1@0900"), wednesday.map { it.key })
+        assertEquals(listOf("D0@0900"), wednesday.map { it.key })
         assertEquals("Tomorrow morning, 09:00", wednesday[0].label)
 
         val thursday = SnoozeSuggestions.rank(listOf(stats), instant(LocalDateTime.of(2026, 9, 24, 7, 0)), zone)
-        assertEquals(listOf("D1@0900"), thursday.map { it.key })
-        assertEquals(epoch(LocalDateTime.of(2026, 9, 25, 9, 0)), thursday[0].epochMillis)
+        assertEquals(listOf("D0@0900"), thursday.map { it.key })
+        assertEquals(epoch(LocalDateTime.of(2026, 9, 24, 9, 0)), thursday[0].epochMillis)
+        assertEquals("This morning, 09:00", thursday[0].label)
     }
 
     @Test
@@ -528,10 +529,13 @@ class SnoozeSuggestionsTest {
                     for (clock in clockTimes) {
                         val target = LocalDateTime.of(commitAt.toLocalDate().plusDays(days), clock)
                         val dist = ChronoUnit.DAYS.between(snoozeDayOf(commitAt), snoozeDayOf(target))
-                        if (epoch(target) <= now + 5 * 60_000L || dist > 14) continue
+                        // Which hit of this clock time the target is, counting the first after now as 0.
+                        val hit = if (epoch(target.minusDays(dist)) > now + 60_000L) dist else dist - 1
+                        val labelDays = ChronoUnit.DAYS.between(atZone(now).toLocalDate(), snoozeDayOf(target))
+                        if (epoch(target) <= now + 5 * 60_000L || hit > 13) continue
                         val next = commitOnce(SnoozeStatsSnapshot(), commitAt, target).next
                         val top = SnoozeSuggestions.rank(listOf(next), Instant.ofEpochMilli(now), zone).firstOrNull()
-                        val named = dist < 2 || Regex("^(Wd|Wn)\\d").containsMatchIn(top?.key ?: "")
+                        val named = labelDays < 2 || Regex("^(Wd|Wn)\\d").containsMatchIn(top?.key ?: "")
                         val want = expectedLabel(target, atZone(now), top?.key ?: "")
                         if (top == null || !SnoozeSuggestions.isTimedKey(top.key) || top.epochMillis != epoch(target) || !named ||
                             top.label != want

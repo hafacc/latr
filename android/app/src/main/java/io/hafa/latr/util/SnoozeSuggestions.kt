@@ -60,6 +60,8 @@ object SnoozeSuggestions {
     const val DEFAULT_FLOOR = 0.05
     private const val QUICK_TIMES_MAX = 4
     private const val SCORE_EPS = 1e-9
+    // A key must resolve at least this far ahead of now.
+    private const val MIN_LEAD_MS = 60_000L
     private const val LITTLE_WHILE_MAX_HOURS = 3
     const val SHOWN_ROWS = 5
     const val DEEP_ROWS = 20
@@ -89,15 +91,23 @@ object SnoozeSuggestions {
     private val LONG_PERIOD_RULES = setOf("Dom1", "Dom15", "DomL", "Mo1", "Mo2", "Mo3")
 
     /** The set of pattern keys a commit from [at] to [target] matches. Empty if no date rule reaches it. */
-    fun extract(at: Instant, target: Instant, zone: ZoneId): Set<PatternKey> {
-        val a = LocalDateTime.ofInstant(at, zone)
-        val t = LocalDateTime.ofInstant(target, zone)
-        return extractTimedKeys(a, t) + extractOffsetKeys(at, target, zone)
-    }
+    fun extract(at: Instant, target: Instant, zone: ZoneId): Set<PatternKey> =
+        extractTimedKeys(at, LocalDateTime.ofInstant(target, zone), zone) + extractOffsetKeys(at, target, zone)
 
-    private fun extractTimedKeys(a: LocalDateTime, t: LocalDateTime): Set<PatternKey> {
+    /** Every clock key that, resolved at [at], lands on [t]'s slot. */
+    private fun extractTimedKeys(at: Instant, t: LocalDateTime, zone: ZoneId): Set<PatternKey> {
         val slot = slotOf(t)
-        return dateRulesFor(snoozeDay(a), snoozeDay(t)).map { "$it@$slot" }.toSet()
+        val clock = slotClockMinutes(slot)
+        val anchor = firstHitDay(clock, at, zone)
+        val targetDay = snoozeDay(t)
+        val d = ChronoUnit.DAYS.between(anchor, targetDay)
+        if (d < 0) return emptySet()
+        if (targetDay == snoozeDay(LocalDateTime.ofInstant(at, zone))) return setOf("D$d@$slot")
+        val dow = targetDay.dayOfWeek.value
+        val candidates = mutableListOf("D$d", "Wd$dow", "Wn$dow", "Dom1", "Dom15", "DomL")
+        if (d % 7 == 0L && d in 7..28) candidates += "W${d / 7}"
+        candidates += listOf("Mo1", "Mo2", "Mo3")
+        return candidates.filter { clockRuleDay(it, anchor, at, zone) == targetDay }.map { "$it@$slot" }.toSet()
     }
 
     /** The target's local clock time rounded to 5 minutes, as "HHMM"; never rounds across the 05:00 boundary. */
@@ -122,30 +132,48 @@ object SnoozeSuggestions {
         val h = Math.round(deltaMin / 60.0)
         // An offset that crosses into the next snooze day is really a clock time there, not "N hours later".
         if (h < 0 || h > 12 || snoozeDay(base.toLocalDateTime()) != snoozeDay(tLocal)) return emptySet()
-        val rules = dateRulesFor(snoozeDay(aLocal), snoozeDay(base.toLocalDateTime()))
-            .filter { isShortFamily(it) }
+        val rules = offsetRulesFor(snoozeDay(aLocal), snoozeDay(base.toLocalDateTime()))
         return rules.mapNotNull { r -> if (r == "D0" && h == 0L) null else "${r}_h$h" }.toSet()
     }
 
-    private fun isShortFamily(rule: String): Boolean =
-        D_RE.matches(rule) || W_RE.matches(rule) || WD_RE.matches(rule) || WN_RE.matches(rule)
-
-    /** Every date-rule id [toDay] satisfies relative to [fromDay] (0-4 of them). */
-    private fun dateRulesFor(fromDay: LocalDate, toDay: LocalDate): List<String> {
+    /** The date rules an hour offset from [fromDay] can use to reach [toDay]. */
+    private fun offsetRulesFor(fromDay: LocalDate, toDay: LocalDate): List<String> {
         val d = ChronoUnit.DAYS.between(fromDay, toDay)
         if (d < 0) return emptyList()
-        val rules = mutableListOf<String>()
-        rules += "D$d"
+        val rules = mutableListOf("D$d")
         if (d == 7L || d == 14L || d == 21L || d == 28L) rules += "W${d / 7}"
         if (d in 1..7) rules += "Wd${toDay.dayOfWeek.value}"
         if (d in 8..14) rules += "Wn${toDay.dayOfWeek.value}"
-        if (d >= 1) {
-            if (toDay == nextDayOfMonth(fromDay, 1)) rules += "Dom1"
-            if (toDay == nextDayOfMonth(fromDay, 15)) rules += "Dom15"
-            if (toDay == nextMonthEnd(fromDay)) rules += "DomL"
-            for (k in 1..3) if (toDay == fromDay.plusMonths(k.toLong())) rules += "Mo$k"
-        }
         return rules
+    }
+
+    /** [clockMinutes] on snooze day [day], as wall-clock minutes past 05:00 so a night time keeps its clock reading across DST. */
+    private fun onSnoozeDay(day: LocalDate, clockMinutes: Int, zone: ZoneId): Long {
+        val sinceBoundary = (clockMinutes - DAY_BOUNDARY_HOUR.toInt() * 60 + 24 * 60) % (24 * 60)
+        return LocalDateTime.of(day, LocalTime.of(DAY_BOUNDARY_HOUR.toInt(), 0)).plusMinutes(sinceBoundary.toLong())
+            .atZone(zone).toInstant().toEpochMilli()
+    }
+
+    /** The snooze day of the first [clockMinutes] at least [MIN_LEAD_MS] after [from]. */
+    private fun firstHitDay(clockMinutes: Int, from: Instant, zone: ZoneId): LocalDate {
+        var day = snoozeDay(LocalDateTime.ofInstant(from, zone))
+        while (onSnoozeDay(day, clockMinutes, zone) <= from.toEpochMilli() + MIN_LEAD_MS) day = day.plusDays(1)
+        return day
+    }
+
+    /** The snooze day a clock key's date rule names: days and weeks count from [anchor] (its first hit), months from [now]'s snooze day. */
+    private fun clockRuleDay(dateRule: String, anchor: LocalDate, now: Instant, zone: ZoneId): LocalDate? {
+        D_RE.matchEntire(dateRule)?.let { return anchor.plusDays(it.groupValues[1].toLong()) }
+        W_RE.matchEntire(dateRule)?.let { return anchor.plusWeeks(it.groupValues[1].toLong()) }
+        WD_RE.matchEntire(dateRule)?.let { return nextWeekday(anchor, DayOfWeek.of(it.groupValues[1].toInt()), 0, 6) }
+        WN_RE.matchEntire(dateRule)?.let { return nextWeekday(anchor, DayOfWeek.of(it.groupValues[1].toInt()), 7, 13) }
+        if (dateRule == "Dom1") return nextDayOfMonth(anchor.minusDays(1), 1)
+        if (dateRule == "Dom15") return nextDayOfMonth(anchor.minusDays(1), 15)
+        if (dateRule == "DomL") return nextMonthEnd(anchor.minusDays(1))
+        MO_RE.matchEntire(dateRule)?.let {
+            return snoozeDay(LocalDateTime.ofInstant(now, zone)).plusMonths(it.groupValues[1].toLong())
+        }
+        return null
     }
 
     private fun nextDayOfMonth(from: LocalDate, dayOfMonth: Int): LocalDate {
@@ -201,11 +229,27 @@ object SnoozeSuggestions {
 
     private fun splitSetId(id: String): Set<PatternKey> = id.split("__").toSet()
 
-    /** A set's keys, minus offsets whose day no clock time in the set shares: older builds saved those across midnight. */
+    /** The day count of the one D-rule key among [keys], or null unless there is exactly one. */
+    private fun dayCountOf(keys: Collection<PatternKey>): Long? =
+        keys.mapNotNull { D_RE.matchEntire(dateRuleOf(it))?.groupValues?.get(1)?.toLong() }.singleOrNull()
+
+    /** A set's keys as they read now: none if its clock keys disagree about the day (older builds' 7- and 14-day sets), no offsets off its clock time's day (older builds saved some across midnight). */
     private fun liveMembers(id: String): Set<PatternKey> {
         val keys = splitSetId(id)
-        val timedRules = keys.filter { isTimedKey(it) }.map { dateRuleOf(it) }.toSet()
-        return keys.filter { isTimedKey(it) || dateRuleOf(it) in timedRules }.toSet()
+        val timed = keys.filter { isTimedKey(it) }.toSet()
+        val days = dayCountOf(timed) ?: return timed
+        val consistent = timed.all { key ->
+            val rule = dateRuleOf(key)
+            when {
+                W_RE.matches(rule) -> rule.drop(1).toLong() * 7 == days
+                WD_RE.matches(rule) -> days <= 6
+                WN_RE.matches(rule) -> days in 7..13
+                else -> true
+            }
+        }
+        if (!consistent) return emptySet()
+        val offsetDays = dayCountOf(keys.filter { !isTimedKey(it) })
+        return if (offsetDays != null && offsetDays - days in 0..1) keys else timed
     }
 
     private fun decayFactor(ageMs: Long, halfLifeDays: Long): Double =
@@ -269,6 +313,43 @@ object SnoozeSuggestions {
         )
     }
 
+    /** A clock key as builds before the first-hit rule resolved it: its date rule counted from [at]'s snooze day. For [upgradeLegacySets] only. */
+    private fun legacyClockTime(key: PatternKey, at: Instant, zone: ZoneId): Long? {
+        if (!isTimedKey(key) || !KEY_RE.matches(key)) return null
+        val from = snoozeDay(LocalDateTime.ofInstant(at, zone))
+        val dateRule = dateRuleOf(key)
+        val day = when (dateRule) {
+            "Dom1" -> nextDayOfMonth(from, 1)
+            "Dom15" -> nextDayOfMonth(from, 15)
+            "DomL" -> nextMonthEnd(from)
+            else -> MO_RE.matchEntire(dateRule)?.let { from.plusMonths(it.groupValues[1].toLong()) }
+                ?: offsetRuleDay(dateRule, from)
+                ?: return null
+        }
+        return onSnoozeDay(day, slotClockMinutes(key.substringAfter('@')), zone).takeIf { it > at.toEpochMilli() + MIN_LEAD_MS }
+    }
+
+    /** Sets saved before the first-hit rule, re-learned from the target their clock keys named at their last commit; sets that land on the same new id merge. A set whose clock keys don't agree on one target is kept as saved. */
+    fun upgradeLegacySets(sets: Map<String, SetStat>, zone: ZoneId): Map<String, SetStat> {
+        val out = mutableMapOf<String, SetStat>()
+        for ((id, stat) in sets) {
+            val at = Instant.ofEpochMilli(stat.t)
+            val targets = splitSetId(id).filter { isTimedKey(it) }.map { legacyClockTime(it, at, zone) }.toSet()
+            val target = targets.singleOrNull()
+            val keys = if (target != null) extract(at, Instant.ofEpochMilli(target), zone) else emptySet()
+            val newId = if (keys.isNotEmpty()) setId(keys) else id
+            val prev = out[newId]
+            out[newId] = if (prev == null) {
+                stat
+            } else {
+                val halfLife = setH(newId)
+                val t = maxOf(prev.t, stat.t)
+                SetStat(prev.c * decayFactor(t - prev.t, halfLife) + stat.c * decayFactor(t - stat.t, halfLife), t)
+            }
+        }
+        return out
+    }
+
     /** Reverts exactly what [result] changed. */
     fun revert(stats: SnoozeStatsSnapshot, result: CommitResult): SnoozeStatsSnapshot {
         var sets = stats.sets
@@ -330,44 +411,44 @@ object SnoozeSuggestions {
         val membersById = mutableMapOf<String, Set<PatternKey>>()
         for (partition in partitions) {
             for ((id, s) in partition.sets) {
+                val members = membersById.getOrPut(id) { liveMembers(id) }
+                if (members.isEmpty()) continue
                 val live = s.c * decayFactor(nowMillis - s.t, setH(id))
                 if (live <= 0.0) continue
                 liveById[id] = (liveById[id] ?: 0.0) + live
-                membersById.getOrPut(id) { liveMembers(id) }
             }
         }
         val available = liveById.keys.toMutableSet()
 
-        val candidateKeys = available.flatMap { membersById.getValue(it) }.toSet()
         val resolved = mutableMapOf<PatternKey, Long>()
-        for (key in candidateKeys) {
+        for (key in available.flatMap { membersById.getValue(it) }.toSet()) {
             resolveFuture(key, now, zone)?.let { resolved[key] = it }
         }
 
         val rows = mutableListOf<SnoozeRow>()
         val settled = mutableSetOf<PatternKey>()
         while (rows.size < n) {
-            // A key that has already passed today still wins its ties, so its weight isn't handed to its offsets.
             var best: PatternKey? = null
             var bestScore = 0.0
-            for (key in candidateKeys) {
+            for ((key, time) in resolved) {
                 if (key in settled) continue
                 val agg = available.filter { key in membersById.getValue(it) }.sumOf { liveById.getValue(it) }
-                if (agg <= 0.0) continue
-                val better = if (sameScore(agg, bestScore)) best == null || tieBreak(key, best) < 0 else agg > bestScore
+                if (agg <= floor) continue
+                val better = if (best == null) {
+                    true
+                } else if (sameScore(agg, bestScore)) {
+                    tieBreak(key, time, best, resolved.getValue(best), now, zone) < 0
+                } else {
+                    agg > bestScore
+                }
                 if (better) {
                     best = key
                     bestScore = agg
                 }
             }
-            if (best == null || bestScore <= floor) break
+            if (best == null) break
             val pickedKey = best
-            val pickedTime = resolved[pickedKey]
-            if (pickedTime == null) {
-                settled += pickedKey
-                available -= available.filter { pickedKey in membersById.getValue(it) }.toSet()
-                continue
-            }
+            val pickedTime = resolved.getValue(pickedKey)
             val absorbed = resolved.keys.filter {
                 it != pickedKey && it !in settled && resolved.getValue(it) == pickedTime
             }
@@ -393,35 +474,37 @@ object SnoozeSuggestions {
         return last.target
     }
 
-    // On a tie, after clock time over offset, lower wins: today/tomorrow, then a named weekday/day of month, then a count of days/weeks/months.
-    private fun tieRank(dateRule: String): Int = when {
-        dateRule == "D0" || dateRule == "D1" -> 0
-        WD_RE.matches(dateRule) -> 1
-        WN_RE.matches(dateRule) -> 2
-        dateRule == "Dom1" || dateRule == "Dom15" || dateRule == "DomL" -> 3
-        D_RE.matches(dateRule) -> 4
-        W_RE.matches(dateRule) -> 5
-        else -> 6
+    // On a tie, after clock time over offset, lower wins: a day count landing today/tomorrow, then a named weekday/day of month, then a count of days/weeks/months.
+    private fun tieRank(key: PatternKey, time: Long, now: Instant, zone: ZoneId): Int {
+        val dateRule = dateRuleOf(key)
+        return when {
+            D_RE.matches(dateRule) -> if (labelDist(time, now, zone) <= 1) 0 else 4
+            WD_RE.matches(dateRule) -> 1
+            WN_RE.matches(dateRule) -> 2
+            dateRule == "Dom1" || dateRule == "Dom15" || dateRule == "DomL" -> 3
+            W_RE.matches(dateRule) -> 5
+            else -> 6
+        }
     }
 
     // Both platforms sum doubles in different orders, so an exact == could pick different winners.
     private fun sameScore(a: Double, b: Double): Boolean =
         Math.abs(a - b) <= SCORE_EPS * maxOf(1.0, Math.abs(a), Math.abs(b))
 
-    /** Negative if [a] should be preferred over [b] when their aggregate scores tie. */
-    private fun tieBreak(a: PatternKey, b: PatternKey): Int {
+    /** Negative if [a] (resolving to [aTime]) should be preferred over [b] when their aggregate scores tie. */
+    private fun tieBreak(a: PatternKey, aTime: Long, b: PatternKey, bTime: Long, now: Instant, zone: ZoneId): Int {
         val oa = if (isTimedKey(a)) 0 else 1
         val ob = if (isTimedKey(b)) 0 else 1
         if (oa != ob) return oa - ob
-        val ra = tieRank(dateRuleOf(a))
-        val rb = tieRank(dateRuleOf(b))
+        val ra = tieRank(a, aTime, now, zone)
+        val rb = tieRank(b, bTime, now, zone)
         if (ra != rb) return ra - rb
         return a.compareTo(b) // code-unit order; must match web's `a < b`, not localeCompare
     }
 
     /** Where [key] points from [now], or null if that isn't at least a minute ahead. */
     internal fun resolveFuture(key: PatternKey, now: Instant, zone: ZoneId): Long? =
-        resolveKey(key, now, zone)?.takeIf { it > now.toEpochMilli() + 60_000 }
+        resolveKey(key, now, zone)?.takeIf { it > now.toEpochMilli() + MIN_LEAD_MS }
 
     private fun resolveKey(key: PatternKey, now: Instant, zone: ZoneId): Long? {
         if (!KEY_RE.matches(key)) return null
@@ -430,29 +513,25 @@ object SnoozeSuggestions {
         return if (!isTimedKey(key)) {
             val h = key.substringAfter("_h").toInt()
             val sd = snoozeDay(nowLocal)
-            val date = resolveDateRule(dateRule, sd) ?: return null
+            val date = offsetRuleDay(dateRule, sd) ?: return null
             val numDays = ChronoUnit.DAYS.between(sd, date)
             // Wall-clock days, then elapsed hours (ZonedDateTime.plusHours), matching extraction.
             val zoned = now.atZone(zone).plusDays(numDays).plusHours(h.toLong())
             val epoch = snapTo5Min(zoned.toInstant().toEpochMilli())
             if (snoozeDay(LocalDateTime.ofInstant(Instant.ofEpochMilli(epoch), zone)) != date) null else epoch
         } else {
-            val date = resolveDateRule(dateRule, snoozeDay(nowLocal)) ?: return null
-            val sinceBoundary = (slotClockMinutes(key.substringAfter('@')) - DAY_BOUNDARY_HOUR.toInt() * 60 + 24 * 60) % (24 * 60)
-            LocalDateTime.of(date, LocalTime.of(DAY_BOUNDARY_HOUR.toInt(), 0)).plusMinutes(sinceBoundary.toLong())
-                .atZone(zone).toInstant().toEpochMilli()
+            val clock = slotClockMinutes(key.substringAfter('@'))
+            val date = clockRuleDay(dateRule, firstHitDay(clock, now, zone), now, zone) ?: return null
+            onSnoozeDay(date, clock, zone)
         }
     }
 
-    private fun resolveDateRule(dateRule: String, from: LocalDate): LocalDate? {
+    /** The snooze day an hour offset's date rule points to, counted from today's snooze day [from]. */
+    private fun offsetRuleDay(dateRule: String, from: LocalDate): LocalDate? {
         D_RE.matchEntire(dateRule)?.let { return from.plusDays(it.groupValues[1].toLong()) }
         W_RE.matchEntire(dateRule)?.let { return from.plusWeeks(it.groupValues[1].toLong()) }
         WD_RE.matchEntire(dateRule)?.let { return nextWeekday(from, DayOfWeek.of(it.groupValues[1].toInt()), 1, 7) }
         WN_RE.matchEntire(dateRule)?.let { return nextWeekday(from, DayOfWeek.of(it.groupValues[1].toInt()), 8, 14) }
-        if (dateRule == "Dom1") return nextDayOfMonth(from, 1)
-        if (dateRule == "Dom15") return nextDayOfMonth(from, 15)
-        if (dateRule == "DomL") return nextMonthEnd(from)
-        MO_RE.matchEntire(dateRule)?.let { return from.plusMonths(it.groupValues[1].toLong()) }
         return null
     }
 
