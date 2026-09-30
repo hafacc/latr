@@ -1199,7 +1199,7 @@ fun TodoItem(
         CompositionLocalProvider(LocalViewConfiguration provides baseViewConfig) {
         val rowColor = MaterialTheme.colorScheme.surfaceContainerLowest
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
@@ -1264,8 +1264,9 @@ fun TodoItem(
                 imageVector = stateIcon,
                 contentDescription = if (todo.pinned) "Pinned" else null,
                 tint = stateIconTint,
+                // Centers the 22dp icon on the 24sp first line of text.
                 modifier = Modifier
-                    .padding(end = 16.dp)
+                    .padding(top = 1.dp, end = 16.dp)
                     .size(22.dp)
             )
             Column(modifier = Modifier.weight(1f)) {
