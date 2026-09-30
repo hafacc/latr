@@ -22,9 +22,9 @@ class SnoozeStatsWireTest {
     }
 
     @Test
-    fun `the wire form has exactly sets, tod, lastCustom and picks`() {
+    fun `the wire form has exactly v, sets, tod, lastCustom and picks`() {
         val wire = SnoozeStatsWire.toWire(SnoozeStatsSnapshot())
-        assertEquals(setOf("sets", "tod", "lastCustom", "picks"), wire.keys)
+        assertEquals(setOf("v", "sets", "tod", "lastCustom", "picks"), wire.keys)
         assertFalse("deviceId" in wire)
         assertNull(wire["lastCustom"])
     }
@@ -32,6 +32,7 @@ class SnoozeStatsWireTest {
     @Test
     fun `stale and malformed entries are dropped`() {
         val raw = mapOf(
+            "v" to 2L,
             "sets" to mapOf(
                 "D1_morning__Wd4_morning" to mapOf("c" to 1.0, "t" to 1L),
                 "D1@0900__D1_morning" to mapOf("c" to 1.0, "t" to 1L),

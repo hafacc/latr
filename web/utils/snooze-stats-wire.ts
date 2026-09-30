@@ -5,10 +5,15 @@ import {
   type SetEntry,
   SLOT_RE,
   splitSetId,
+  upgradeLegacySets,
 } from "./snooze-suggest";
+
+// Partitions without it were saved before clock keys counted from their first hit, and are upgraded on read.
+const PARTITION_VERSION = 2;
 
 // The Firestore / localStorage shape of one device's partition; the device id is the path, not a field.
 export type WirePartition = {
+  v: number;
   sets: DevicePartition["sets"];
   tod: DevicePartition["tod"];
   lastCustom: DevicePartition["lastCustom"];
@@ -63,6 +68,7 @@ function normalizePicks(raw: unknown): Record<string, number> {
 
 export function toWire(partition: DevicePartition): WirePartition {
   return {
+    v: PARTITION_VERSION,
     sets: partition.sets,
     tod: partition.tod,
     lastCustom: partition.lastCustom ?? null,
@@ -73,11 +79,13 @@ export function toWire(partition: DevicePartition): WirePartition {
 /** Parses an untrusted stored or remote partition, dropping anything malformed or from an older key shape. */
 export function fromWire(deviceId: string, raw: unknown): DevicePartition {
   const record = isRecord(raw) ? raw : {};
+  const sets = normalizeCounters(record.sets, (id) =>
+    splitSetId(id).every((key) => KEY_RE.test(key)),
+  );
+  const current = typeof record.v === "number" && record.v >= PARTITION_VERSION;
   return {
     deviceId,
-    sets: normalizeCounters(record.sets, (id) =>
-      splitSetId(id).every((key) => KEY_RE.test(key)),
-    ),
+    sets: current ? sets : upgradeLegacySets(sets),
     tod: normalizeCounters(record.tod, (slot) => SLOT_RE.test(slot)),
     lastCustom: normalizeLastCustom(record.lastCustom),
     picks: normalizePicks(record.picks),

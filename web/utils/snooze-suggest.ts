@@ -7,6 +7,8 @@ const TOD_HALF_LIFE_DAYS = 21;
 const SLOT_MINUTES = 5;
 const QUICK_TIMES_MAX = 4;
 const SCORE_EPS = 1e-9;
+// A key must resolve at least this far ahead of now.
+const MIN_LEAD_MS = MINUTE_MS;
 const LITTLE_WHILE_MAX_HOURS = 3;
 export const SHOWN_ROWS = 5;
 export const DEEP_ROWS = 20;
@@ -54,10 +56,6 @@ function snoozeDay(d: Date): Date {
       d.getMinutes(),
     ),
   );
-}
-
-function addDaysToSnoozeDay(now: Date, n: number): Date {
-  return addDays(snoozeDay(now), n);
 }
 
 function minutesSince0500(d: Date): number {
@@ -138,14 +136,13 @@ function isoDow(d: Date): number {
 }
 
 function nextWeekdayInRange(
-  now: Date,
+  from: Date,
   dow: number,
   minD: number,
   maxD: number,
 ): Date {
-  const sd = snoozeDay(now);
   for (let d = minD; d <= maxD; d++) {
-    const cand = addDays(sd, d);
+    const cand = addDays(from, d);
     if (isoDow(cand) === dow) return cand;
   }
   throw new Error(`unreachable: no ${dow} in [${minD},${maxD}]`);
@@ -168,56 +165,93 @@ function numOf(dateRule: string): number {
   return m ? Number.parseInt(m[1], 10) : 0;
 }
 
-/** Every date rule `t` satisfies relative to `a`, all read on snooze days. */
-function dateRulesFor(a: Date, t: Date): string[] {
-  const sa = snoozeDay(a);
-  const st = snoozeDay(t);
-  const d = Math.round((st.getTime() - sa.getTime()) / DAY_MS);
+/** The date rules an hour offset from `a` can use to reach `base`'s snooze day. */
+function offsetRulesFor(a: Date, base: Date): string[] {
+  const d = Math.round(
+    (snoozeDay(base).getTime() - snoozeDay(a).getTime()) / DAY_MS,
+  );
   if (d < 0) return [];
-  const rules: string[] = [];
-  rules.push(`D${d}`);
+  const rules = [`D${d}`];
   if (d === 7 || d === 14 || d === 21 || d === 28) rules.push(`W${d / 7}`);
-  const dow = isoDow(st);
+  const dow = isoDow(snoozeDay(base));
   if (d >= 1 && d <= 7) rules.push(`Wd${dow}`);
   if (d >= 8 && d <= 14) rules.push(`Wn${dow}`);
-  if (d >= 1) {
-    for (const day of [1, 15]) {
-      if (sameDate(st, nextDom(sa, day))) rules.push(`Dom${day}`);
-    }
-    if (sameDate(st, nextMonthEnd(sa))) rules.push("DomL");
-    for (let k = 1; k <= 3; k++) {
-      if (sameDate(st, addMonthsClamped(sa, k))) rules.push(`Mo${k}`);
-    }
-  }
   return rules;
 }
 
-function isShortFamily(dateRule: string): boolean {
-  const fam = familyOf(dateRule);
-  return fam === "D" || fam === "W" || fam === "Wd" || fam === "Wn";
+/** The snooze day an hour offset's date rule points to, counted from today's snooze day. */
+function offsetRuleDay(dateRule: string, now: Date): Date {
+  const today = snoozeDay(now);
+  const num = numOf(dateRule);
+  switch (familyOf(dateRule)) {
+    case "D":
+      return addDays(today, num);
+    case "W":
+      return addDays(today, num * 7);
+    case "Wd":
+      return nextWeekdayInRange(today, num, 1, 7);
+    case "Wn":
+      return nextWeekdayInRange(today, num, 8, 14);
+    default:
+      throw new Error(`unresolvable offset date rule ${dateRule}`);
+  }
 }
 
-/** The snooze day a date rule points to from `now`; the D/W/Wd/Wn helpers shift `now` themselves. */
-function resolveDateRule(dateRule: string, now: Date): Date {
-  if (dateRule === "DomL") return nextMonthEnd(snoozeDay(now));
-  const fam = familyOf(dateRule);
-  const num = numOf(dateRule);
-  switch (fam) {
-    case "D":
-      return addDaysToSnoozeDay(now, num);
-    case "W":
-      return addDaysToSnoozeDay(now, num * 7);
-    case "Wd":
-      return nextWeekdayInRange(now, num, 1, 7);
-    case "Wn":
-      return nextWeekdayInRange(now, num, 8, 14);
-    case "Dom":
-      return nextDom(snoozeDay(now), num);
-    case "Mo":
-      return addMonthsClamped(snoozeDay(now), num);
-    default:
-      throw new Error(`unresolvable date rule ${dateRule}`);
+/** `clockMinutes` on snooze day `day`, as wall-clock minutes past 05:00 so a night time keeps its clock reading across DST. */
+function onSnoozeDay(day: Date, clockMinutes: number): number {
+  return new Date(
+    day.getFullYear(),
+    day.getMonth(),
+    day.getDate(),
+    5,
+    (clockMinutes - 300 + 1440) % 1440,
+  ).getTime();
+}
+
+/** The snooze day of the first `clockMinutes` at least MIN_LEAD_MS after `from`. */
+function firstHitDay(clockMinutes: number, from: number): Date {
+  let day = snoozeDay(new Date(from));
+  while (onSnoozeDay(day, clockMinutes) <= from + MIN_LEAD_MS) {
+    day = addDays(day, 1);
   }
+  return day;
+}
+
+/** The snooze day a clock key's date rule names: days and weeks count from `anchor` (its first hit), months from `now`'s snooze day. */
+function clockRuleDay(dateRule: string, anchor: Date, now: Date): Date {
+  const num = numOf(dateRule);
+  switch (familyOf(dateRule)) {
+    case "D":
+      return addDays(anchor, num);
+    case "W":
+      return addDays(anchor, num * 7);
+    case "Wd":
+      return nextWeekdayInRange(anchor, num, 0, 6);
+    case "Wn":
+      return nextWeekdayInRange(anchor, num, 7, 13);
+    case "Dom":
+      return nextDom(addDays(anchor, -1), num);
+    case "DomL":
+      return nextMonthEnd(addDays(anchor, -1));
+    default:
+      return addMonthsClamped(snoozeDay(now), num);
+  }
+}
+
+/** Every date rule whose clock key, resolved at `a`, lands on `t`'s slot. */
+function clockRulesFor(a: Date, t: Date, clockMinutes: number): string[] {
+  const anchor = firstHitDay(clockMinutes, a.getTime());
+  const st = snoozeDay(t);
+  const d = Math.round((st.getTime() - anchor.getTime()) / DAY_MS);
+  if (d < 0) return [];
+  if (sameDate(st, snoozeDay(a))) return [`D${d}`];
+  const dow = isoDow(st);
+  const candidates = [`D${d}`, `Wd${dow}`, `Wn${dow}`, "Dom1", "Dom15", "DomL"];
+  if (d % 7 === 0 && d >= 7 && d <= 28) candidates.push(`W${d / 7}`);
+  candidates.push("Mo1", "Mo2", "Mo3");
+  return candidates.filter((rule) =>
+    sameDate(clockRuleDay(rule, anchor, a), st),
+  );
 }
 
 /** Local wall-clock fields read as if UTC, so differences count calendar time, not elapsed time. */
@@ -233,10 +267,12 @@ function naiveLocal(d: Date): number {
   );
 }
 
-/** All composite keys a commit from `a` to `t` matches, e.g. ["D1@0900", "Wd1@0900"]. */
+/** All composite keys a commit from `a` to `t` matches, e.g. ["D0@0900", "Wd1@0900"]. */
 export function extractKeys(a: Date, t: Date): string[] {
   const slot = slotOf(t);
-  const timedKeys = dateRulesFor(a, t).map((r) => `${r}@${slot}`);
+  const timedKeys = clockRulesFor(a, t, slotClockMinutes(slot)).map(
+    (r) => `${r}@${slot}`,
+  );
 
   // Whole days on the wall clock, then hours as elapsed time — the inverse of resolveKey.
   const wallMin = Math.round((naiveLocal(t) - naiveLocal(a)) / MINUTE_MS);
@@ -248,8 +284,7 @@ export function extractKeys(a: Date, t: Date): string[] {
   let offsetKeys: string[] = [];
   // An offset that crosses into the next snooze day is really a clock time there, not "N hours later".
   if (h >= 0 && h <= 12 && sameDate(snoozeDay(base), snoozeDay(t))) {
-    const offsetRules = dateRulesFor(a, base).filter((r) => isShortFamily(r));
-    offsetKeys = offsetRules
+    offsetKeys = offsetRulesFor(a, base)
       .filter((r) => !(r === "D0" && h === 0))
       .map((r) => `${r}_h${h}`);
   }
@@ -398,6 +433,65 @@ export function commit(
   };
 }
 
+/** A clock key as builds before the first-hit rule resolved it: its date rule counted from `at`'s snooze day. For upgradeLegacySets only. */
+function legacyClockTime(keyId: string, at: Date): number | null {
+  const key = parseKey(keyId);
+  if (key.kind !== "timed") return null;
+  const from = snoozeDay(at);
+  const num = numOf(key.dateRule);
+  let day: Date;
+  switch (familyOf(key.dateRule)) {
+    case "Dom":
+      day = nextDom(from, num);
+      break;
+    case "DomL":
+      day = nextMonthEnd(from);
+      break;
+    case "Mo":
+      day = addMonthsClamped(from, num);
+      break;
+    default:
+      day = offsetRuleDay(key.dateRule, at);
+  }
+  const epoch = onSnoozeDay(day, key.clockMinutes);
+  return epoch > at.getTime() + MIN_LEAD_MS ? epoch : null;
+}
+
+/** Sets saved before the first-hit rule, re-learned from the target their clock keys named at their last commit; sets that land on the same new id merge. A set whose clock keys don't agree on one target is kept as saved. */
+export function upgradeLegacySets(
+  sets: Record<string, SetEntry>,
+): Record<string, SetEntry> {
+  const out: Record<string, SetEntry> = {};
+  for (const [setId, entry] of Object.entries(sets)) {
+    const at = new Date(entry.t);
+    const targets = new Set(
+      splitSetId(setId)
+        .filter(isTimedKey)
+        .map((key) => legacyClockTime(key, at)),
+    );
+    const [target] = targets;
+    const keys =
+      targets.size === 1 && target != null
+        ? extractKeys(at, new Date(target))
+        : [];
+    const newId = keys.length > 0 ? canonicalSetId(keys) : setId;
+    const prev = out[newId];
+    if (prev) {
+      const halfLife = classHForSet(splitSetId(newId));
+      const t = Math.max(prev.t, entry.t);
+      out[newId] = {
+        c:
+          decay(prev.c, t - prev.t, halfLife) +
+          decay(entry.c, t - entry.t, halfLife),
+        t,
+      };
+    } else {
+      out[newId] = entry;
+    }
+  }
+  return out;
+}
+
 export function undoCommit(
   partition: DevicePartition,
   snap: CommitUndoSnapshot,
@@ -430,17 +524,17 @@ function snapTo5Min(epoch: number): number {
   return Math.round(epoch / (5 * MINUTE_MS)) * (5 * MINUTE_MS);
 }
 
-/** Resolves a composite key to a concrete epoch given `now`, or null if it can't happen (past / <1min out). */
+/** Resolves a composite key to a concrete epoch given `now`, or null if it can't happen (an offset off its day / <1min out). */
 export function resolveKey(keyId: string, now: Date): number | null {
   const key = parseKey(keyId);
-  let dayDate: Date;
-  try {
-    dayDate = resolveDateRule(key.dateRule, now);
-  } catch {
-    return null;
-  }
   let epoch: number;
   if (key.kind === "offset") {
+    let dayDate: Date;
+    try {
+      dayDate = offsetRuleDay(key.dateRule, now);
+    } catch {
+      return null;
+    }
     const numDays = Math.round(
       (dayDate.getTime() - snoozeDay(now).getTime()) / DAY_MS,
     );
@@ -450,16 +544,13 @@ export function resolveKey(keyId: string, now: Date): number | null {
     epoch = snapTo5Min(base.getTime() + key.hours * HOUR_MS);
     if (!sameDate(snoozeDay(new Date(epoch)), dayDate)) return null;
   } else {
-    // Wall-clock minutes past 05:00, so a night time keeps its clock reading across DST.
-    epoch = new Date(
-      dayDate.getFullYear(),
-      dayDate.getMonth(),
-      dayDate.getDate(),
-      5,
-      (key.clockMinutes - 300 + 1440) % 1440,
-    ).getTime();
+    const anchor = firstHitDay(key.clockMinutes, now.getTime());
+    epoch = onSnoozeDay(
+      clockRuleDay(key.dateRule, anchor, now),
+      key.clockMinutes,
+    );
   }
-  if (epoch <= now.getTime() + 60_000) return null;
+  if (epoch <= now.getTime() + MIN_LEAD_MS) return null;
   return epoch;
 }
 
@@ -483,11 +574,12 @@ export type Row = {
 
 export type LastRow = { time: number; text: string };
 
-// Lower wins, after clock time over offset: today/tomorrow, then named days (Wd/Wn/Dom/DomL), then counted ones (D/W/Mo), shorter period first.
-function tieRank(keyId: string): number {
+// Lower wins, after clock time over offset: a day count landing today/tomorrow, then named days (Wd/Wn/Dom/DomL), then counted ones (D/W/Mo), shorter period first.
+function tieRank(keyId: string, time: number, now: Date): number {
   const { dateRule } = parseKey(keyId);
-  if (dateRule === "D0" || dateRule === "D1") return 0;
   switch (familyOf(dateRule)) {
+    case "D":
+      return dayPhraseOf(dateRule, new Date(time), now).dist <= 1 ? 0 : 4;
     case "Wd":
       return 1;
     case "Wn":
@@ -495,8 +587,6 @@ function tieRank(keyId: string): number {
     case "Dom":
     case "DomL":
       return 3;
-    case "D":
-      return 4;
     case "W":
       return 5;
     default: // Mo
@@ -504,15 +594,17 @@ function tieRank(keyId: string): number {
   }
 }
 
-function betterTie(a: string, b: string): boolean {
-  const aTimed = isTimedKey(a);
-  const bTimed = isTimedKey(b);
+type Candidate = { key: string; time: number };
+
+function betterTie(a: Candidate, b: Candidate, now: Date): boolean {
+  const aTimed = isTimedKey(a.key);
+  const bTimed = isTimedKey(b.key);
   if (aTimed !== bTimed) return aTimed;
-  const ra = tieRank(a);
-  const rb = tieRank(b);
+  const ra = tieRank(a.key, a.time, now);
+  const rb = tieRank(b.key, b.time, now);
   if (ra !== rb) return ra < rb;
   // Code-unit order, not localeCompare, to match Android's String.compareTo.
-  return a < b;
+  return a.key < b.key;
 }
 
 const DEFAULT_FLOOR = 0.05;
@@ -522,15 +614,39 @@ function sameScore(a: number, b: number): boolean {
   return Math.abs(a - b) <= SCORE_EPS * Math.max(1, Math.abs(a), Math.abs(b));
 }
 
-/** A set's keys, minus offsets whose day no clock time in the set shares: older builds saved those across midnight. */
+/** The day count of the one D-rule key among `keys`, or null unless there is exactly one. */
+function dayCountOf(keys: string[]): number | null {
+  const counts = keys
+    .map((key) => parseKey(key).dateRule)
+    .filter((rule) => familyOf(rule) === "D")
+    .map(numOf);
+  return counts.length === 1 ? counts[0] : null;
+}
+
+/** A set's keys as they read now: none if its clock keys disagree about the day (older builds' 7- and 14-day sets), no offsets off its clock time's day (older builds saved some across midnight). */
 function liveMembers(setId: string): string[] {
   const keys = splitSetId(setId);
-  const timedRules = new Set(
-    keys.filter(isTimedKey).map((key) => parseKey(key).dateRule),
-  );
-  return keys.filter(
-    (key) => isTimedKey(key) || timedRules.has(parseKey(key).dateRule),
-  );
+  const timed = keys.filter(isTimedKey);
+  const days = dayCountOf(timed);
+  if (days === null) return timed;
+  const consistent = timed.every((key) => {
+    const rule = parseKey(key).dateRule;
+    switch (familyOf(rule)) {
+      case "W":
+        return numOf(rule) * 7 === days;
+      case "Wd":
+        return days <= 6;
+      case "Wn":
+        return days >= 7 && days <= 13;
+      default:
+        return true;
+    }
+  });
+  if (!consistent) return [];
+  const offsetDays = dayCountOf(keys.filter((key) => !isTimedKey(key)));
+  const offsetsFit =
+    offsetDays !== null && offsetDays - days >= 0 && offsetDays - days <= 1;
+  return offsetsFit ? keys : timed;
 }
 
 /** Rows in greedy selection order, so a row's index is its rank; the menu shows the first SHOWN_ROWS (see `rank`). */
@@ -542,22 +658,24 @@ export function rankDeep(
 ): Row[] {
   const liveSets = new Map<string, number>();
   const setMembers = new Map<string, string[]>();
+  const nowDate = new Date(now);
+  const resolved = new Map<string, number>();
   for (const part of partitions) {
     for (const [setId, entry] of Object.entries(part.sets)) {
       const members = setMembers.get(setId) ?? liveMembers(setId);
+      if (members.length === 0) continue;
       setMembers.set(setId, members);
       const live = decay(entry.c, now - entry.t, classHForSet(members));
       liveSets.set(setId, (liveSets.get(setId) ?? 0) + live);
+      for (const key of members) {
+        if (resolved.has(key)) continue;
+        const time = resolveKey(key, nowDate);
+        if (time !== null) resolved.set(key, time);
+      }
     }
   }
 
   const available = new Set(liveSets.keys());
-  const nowDate = new Date(now);
-  const resolved = new Map<string, number | null>();
-  const resolveCached = (key: string): number | null => {
-    if (!resolved.has(key)) resolved.set(key, resolveKey(key, nowDate));
-    return resolved.get(key) ?? null;
-  };
   const rows: Row[] = [];
 
   while (rows.length < n) {
@@ -566,38 +684,29 @@ export function rankDeep(
       const live = liveSets.get(setId) ?? 0;
       if (live <= 0) continue;
       for (const key of setMembers.get(setId) ?? []) {
-        agg.set(key, (agg.get(key) ?? 0) + live);
+        if (resolved.has(key)) agg.set(key, (agg.get(key) ?? 0) + live);
       }
     }
 
-    // A key that has already passed today still wins its ties, so its weight isn't handed to its offsets.
-    let best: { key: string; score: number; time: number | null } | null = null;
+    let best: (Candidate & { score: number }) | null = null;
     for (const [key, score] of agg) {
+      if (score <= floor) continue;
+      const candidate = { key, score, time: resolved.get(key) ?? 0 };
       if (
         !best ||
         (sameScore(score, best.score)
-          ? betterTie(key, best.key)
+          ? betterTie(candidate, best, nowDate)
           : score > best.score)
       ) {
-        best = { key, score, time: resolveCached(key) };
+        best = candidate;
       }
     }
-    if (!best || best.score <= floor) break;
-    if (best.time === null) {
-      const passed = best.key;
-      for (const setId of Array.from(available)) {
-        if (setMembers.get(setId)?.includes(passed)) available.delete(setId);
-      }
-      continue;
-    }
+    if (!best) break;
     const bestTime = best.time;
 
     const spent = new Set([best.key]);
     for (const [key] of agg) {
-      const time = resolveCached(key);
-      if (time === bestTime) {
-        spent.add(key);
-      }
+      if (resolved.get(key) === bestTime) spent.add(key);
     }
 
     rows.push({

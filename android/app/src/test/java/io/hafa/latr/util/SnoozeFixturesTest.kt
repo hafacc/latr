@@ -90,7 +90,7 @@ class SnoozeFixturesTest {
     @Test
     fun rank() {
         for (case in Fixtures.cases("rank")) {
-            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>) }
+            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>, zone) }
             val actual = SnoozeSuggestions.rank(partitions, instant(case["now"]), zone).map { it.key }
             assertEquals("${case["name"]}", case["expectKeys"], actual)
             val deep = SnoozeSuggestions.rankDeep(partitions, instant(case["now"]), zone)
@@ -102,7 +102,7 @@ class SnoozeFixturesTest {
     fun rankDeep() {
         for (case in Fixtures.cases("rankDeep")) {
             val name = case["name"]
-            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>) }
+            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>, zone) }
             val deep = SnoozeSuggestions.rankDeep(partitions, instant(case["now"]), zone)
             assertEquals("$name", case["expectKeys"], deep.map { it.key })
             assertEquals("$name: shown", case["expectShownKeys"], SnoozeSuggestions.shownRows(deep).map { it.key })
@@ -114,7 +114,7 @@ class SnoozeFixturesTest {
     @Test
     fun pickLog() {
         for (case in Fixtures.cases("pickLog")) {
-            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>) }
+            val partitions = (case["partitions"] as List<*>).map { SnoozeStatsWire.fromWire(it as Map<*, *>, zone) }
             val deep = SnoozeSuggestions.rankDeep(partitions, instant(case["now"]), zone)
             val actual = SnoozeSuggestions.pickLogKey(deep, epoch(case["target"]))
             assertEquals("${case["name"]}", case["expect"], actual)
@@ -126,9 +126,9 @@ class SnoozeFixturesTest {
         for (case in Fixtures.cases("wire")) {
             val name = case["name"]
             val normalized = Fixtures.numbersAsDouble(case["normalized"])
-            val parsed = SnoozeStatsWire.fromWire(case["raw"] as Map<*, *>)
+            val parsed = SnoozeStatsWire.fromWire(case["raw"] as Map<*, *>, zone)
             assertEquals("$name: fromWire", normalized, Fixtures.numbersAsDouble(SnoozeStatsWire.toWire(parsed)))
-            val reparsed = SnoozeStatsWire.fromWire(SnoozeStatsWire.toWire(parsed))
+            val reparsed = SnoozeStatsWire.fromWire(SnoozeStatsWire.toWire(parsed), zone)
             assertEquals("$name: round trip", parsed, reparsed)
         }
     }
