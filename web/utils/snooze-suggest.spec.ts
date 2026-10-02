@@ -22,6 +22,7 @@ import {
   rankDeep,
   resolveKey,
   rowIcon,
+  type SetEntry,
   type SnoozeSource,
   shownRows,
   undoCommit,
@@ -119,7 +120,7 @@ describe("commit / decay", () => {
     expect(before.next.sets[setId]?.c).toBeCloseTo(1.5, 5);
   });
 
-  test("the most-used exact time ranks first and its 5-minute neighbour gives way to its other reading", () => {
+  test("a snooze five minutes from a habit takes most of its votes and ranks first", () => {
     let p = emptyPartition("device-a");
     p = commit(
       p,
@@ -139,10 +140,9 @@ describe("commit / decay", () => {
       at(2024, 3, 7, 8, 5).getTime(),
       "custom",
     ).next;
-    const rows = rank([p], at(2024, 3, 7, 10, 0).getTime());
-    expect(rows.map((r) => r.keyId)).toEqual(["D0@0800", "Wd4@0805"]);
-    expect(new Date(rows[0].time).getHours()).toBe(8);
-    expect(new Date(rows[0].time).getMinutes()).toBe(0);
+    const [first] = rankDeep([p], at(2024, 3, 7, 10, 0).getTime());
+    expect(first.keyId).toBe("D0@0805");
+    expect(p.sets["D0@0800__Wd2@0800"].c).toBeCloseTo(1 - 2 ** (-1 / 6), 9);
   });
 
   test("one date rule can hold two times", () => {
@@ -515,6 +515,15 @@ type Fixtures = {
     target: string;
     expect: string;
   }[];
+  commit: {
+    name: string;
+    at: string;
+    target: string;
+    source: SnoozeSource;
+    pickedKey: string | null;
+    partition: unknown;
+    expect: { sets: Record<string, SetEntry>; tod: Record<string, SetEntry> };
+  }[];
 };
 
 const fixtures = JSON.parse(
@@ -526,6 +535,19 @@ const fixtures = JSON.parse(
 
 function minutesSince0500(d: Date): number {
   return (d.getHours() * 60 + d.getMinutes() - 300 + 1440) % 1440;
+}
+
+function expectCounters(
+  got: Record<string, SetEntry>,
+  want: Record<string, SetEntry>,
+): void {
+  expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());
+  for (const [id, entry] of Object.entries(want)) {
+    expect(got[id].t).toBe(entry.t);
+    expect(Math.abs(got[id].c - entry.c)).toBeLessThanOrEqual(
+      1e-9 * Math.max(1, entry.c),
+    );
+  }
 }
 
 describe("shared fixtures (must match Android)", () => {
@@ -634,6 +656,22 @@ describe("shared fixtures (must match Android)", () => {
       const partitions = c.partitions.map((raw, i) => fromWire(`p${i}`, raw));
       const deep = rankDeep(partitions, local(c.now).getTime());
       expect(pickLogKey(deep, local(c.target).getTime())).toBe(c.expect);
+    });
+  }
+
+  for (const c of fixtures.commit) {
+    test(`commit: ${c.name}`, () => {
+      const before = fromWire("a", c.partition);
+      const { next, undoSnapshot } = commit(
+        before,
+        local(c.at).getTime(),
+        local(c.target).getTime(),
+        c.source,
+        c.pickedKey,
+      );
+      expectCounters(next.sets, c.expect.sets);
+      expectCounters(next.tod, c.expect.tod);
+      expect(undoCommit(next, undoSnapshot)).toEqual(before);
     });
   }
 });

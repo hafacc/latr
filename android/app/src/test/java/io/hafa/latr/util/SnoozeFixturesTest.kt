@@ -121,6 +121,38 @@ class SnoozeFixturesTest {
         }
     }
 
+    private fun assertCounters(name: String, expected: Any?, actual: Map<String, SetStat>) {
+        val want = expected as Map<*, *>
+        assertEquals("$name: ids", want.keys, actual.keys)
+        for ((id, raw) in want) {
+            val entry = raw as Map<*, *>
+            val got = actual.getValue(id as String)
+            val count = (entry["c"] as Number).toDouble()
+            assertEquals("$name: $id t", (entry["t"] as Number).toLong(), got.t)
+            assertEquals("$name: $id c", count, got.c, 1e-9 * maxOf(1.0, count))
+        }
+    }
+
+    @Test
+    fun commit() {
+        for (case in Fixtures.cases("commit")) {
+            val name = "${case["name"]}"
+            val before = SnoozeStatsWire.fromWire(case["partition"] as Map<*, *>, zone)
+            val result = SnoozeSuggestions.commit(
+                before,
+                epoch(case["at"]),
+                epoch(case["target"]),
+                zone,
+                case["source"] as String,
+                case["pickedKey"] as String?,
+            )
+            val expect = case["expect"] as Map<*, *>
+            assertCounters("$name: sets", expect["sets"], result.next.sets)
+            assertCounters("$name: tod", expect["tod"], result.next.tod)
+            assertEquals("$name: undo", before, SnoozeSuggestions.revert(result.next, result))
+        }
+    }
+
     @Test
     fun wire() {
         for (case in Fixtures.cases("wire")) {

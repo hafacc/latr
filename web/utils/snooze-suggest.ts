@@ -9,7 +9,7 @@ const QUICK_TIMES_MAX = 4;
 const SCORE_EPS = 1e-9;
 // A key must resolve at least this far ahead of now.
 const MIN_LEAD_MS = MINUTE_MS;
-// A picked time discounts another by half its weight at this distance, less further off.
+// A time this far from a pick gives way by half: half the pick's weight in the menu, half its own votes when the pick is snoozed to.
 const NEARBY_HALF_DISTANCE_MINUTES = 30;
 const LITTLE_WHILE_MAX_HOURS = 3;
 export const SHOWN_ROWS = 5;
@@ -340,6 +340,9 @@ export function splitSetId(setId: string): string[] {
 export type CommitUndoSnapshot = {
   setId: string | null;
   prevSet: SetEntry | null;
+  // The entries of every other set and quick-time slot the commit took votes from, as they were.
+  nearbySets: Record<string, SetEntry>;
+  nearbyTod: Record<string, SetEntry>;
   // Null when the commit credited no quick-time slot.
   tod: { slot: string; prev: SetEntry | null } | null;
   prevLastCustom: DevicePartition["lastCustom"];
@@ -354,6 +357,50 @@ export type CommitResult = {
 
 function decay(value: number, elapsedMs: number, halfLifeDays: number): number {
   return value * 2 ** (-elapsedMs / (halfLifeDays * DAY_MS));
+}
+
+/** The share of its votes a time `distanceMinutes` from a snoozed-to time loses, and of a pick's weight it is discounted by. */
+function nearbyShare(distanceMinutes: number): number {
+  return 2 ** (-Math.abs(distanceMinutes) / NEARBY_HALF_DISTANCE_MINUTES);
+}
+
+/** Minutes between two clock times, the short way round midnight. */
+function clockDistance(clockMinutes: number, other: number): number {
+  const apart = Math.abs(clockMinutes - other);
+  return Math.min(apart, 1440 - apart);
+}
+
+/** The instant of `target`'s 5-minute slot, where the commit's own clock keys resolve. */
+function slotTime(target: Date): number {
+  return onSnoozeDay(snoozeDay(target), slotClockMinutes(slotOf(target)));
+}
+
+/** The share of its votes a set loses to a snooze to `targetTime`: the largest among its clock keys resolved at `at`, none if one lands exactly there. */
+function nearbySetShare(setId: string, at: Date, targetTime: number): number {
+  let share = 0;
+  for (const key of splitSetId(setId)) {
+    if (!isTimedKey(key)) continue;
+    const time = resolveKey(key, at);
+    if (time === null) continue;
+    if (time === targetTime) return 0;
+    share = Math.max(share, nearbyShare((time - targetTime) / MINUTE_MS));
+  }
+  return share;
+}
+
+/** Cuts each entry's count by its `shareOf`, in place; `taken` collects the changed entries as they were. */
+function takeVotes(
+  entries: Record<string, SetEntry>,
+  shareOf: (id: string) => number,
+  taken: Record<string, SetEntry>,
+): void {
+  for (const [id, entry] of Object.entries(entries)) {
+    const count = entry.c * (1 - shareOf(id));
+    if (count !== entry.c) {
+      taken[id] = entry;
+      entries[id] = { c: count, t: entry.t };
+    }
+  }
 }
 
 /** The quick-time slot a commit credits: none for same-day snoozes or hours-offset picks. */
@@ -394,15 +441,34 @@ export function commit(
     nextSets[setId] = { c: decayed + 1, t: at };
     undoSetId = setId;
   }
+  const nearbySets: Record<string, SetEntry> = {};
+  const atDate = new Date(at);
+  const targetTime = slotTime(new Date(target));
+  takeVotes(
+    nextSets,
+    (setId) =>
+      setId === undoSetId ? 0 : nearbySetShare(setId, atDate, targetTime),
+    nearbySets,
+  );
 
   const nextTod = { ...partition.tod };
   let undoTod: CommitUndoSnapshot["tod"] = null;
+  const nearbyTod: Record<string, SetEntry> = {};
   const slot = quickTimeSlot(at, target, source, pickedKey);
   if (slot !== null) {
     const prev = partition.tod[slot] ?? null;
     const decayed = prev ? decay(prev.c, at - prev.t, TOD_HALF_LIFE_DAYS) : 0;
     nextTod[slot] = { c: decayed + 1, t: at };
     undoTod = { slot, prev };
+    const credited = slotClockMinutes(slot);
+    takeVotes(
+      nextTod,
+      (other) =>
+        other === slot
+          ? 0
+          : nearbyShare(clockDistance(slotClockMinutes(other), credited)),
+      nearbyTod,
+    );
   }
 
   const prevLastCustom = partition.lastCustom;
@@ -428,6 +494,8 @@ export function commit(
     undoSnapshot: {
       setId: undoSetId,
       prevSet,
+      nearbySets,
+      nearbyTod,
       tod: undoTod,
       prevLastCustom,
       pick: undoPick,
@@ -498,12 +566,12 @@ export function undoCommit(
   partition: DevicePartition,
   snap: CommitUndoSnapshot,
 ): DevicePartition {
-  const sets = { ...partition.sets };
+  const sets = { ...partition.sets, ...snap.nearbySets };
   if (snap.setId) {
     if (snap.prevSet) sets[snap.setId] = snap.prevSet;
     else delete sets[snap.setId];
   }
-  const tod = { ...partition.tod };
+  const tod = { ...partition.tod, ...snap.nearbyTod };
   if (snap.tod) {
     if (snap.tod.prev) tod[snap.tod.slot] = snap.tod.prev;
     else delete tod[snap.tod.slot];
@@ -618,9 +686,7 @@ function sameScore(a: number, b: number): boolean {
 
 /** How much a pick of `weight` discounts a time `distanceMinutes` away from it. */
 function nearbyDiscount(weight: number, distanceMinutes: number): number {
-  return (
-    weight * 2 ** (-Math.abs(distanceMinutes) / NEARBY_HALF_DISTANCE_MINUTES)
-  );
+  return weight * nearbyShare(distanceMinutes);
 }
 
 /** Whether `a` beats `b`: higher discounted score, then higher undiscounted score, then `tie`. */
@@ -851,8 +917,10 @@ export function quickTimes(
     out.push({ clockMinutes: picked, weight });
     weights.delete(picked);
     for (const [clockMinutes] of weights) {
-      const apart = Math.abs(clockMinutes - picked);
-      const discount = nearbyDiscount(weight, Math.min(apart, 1440 - apart));
+      const discount = nearbyDiscount(
+        weight,
+        clockDistance(clockMinutes, picked),
+      );
       discounts.set(
         clockMinutes,
         (discounts.get(clockMinutes) ?? 0) + discount,

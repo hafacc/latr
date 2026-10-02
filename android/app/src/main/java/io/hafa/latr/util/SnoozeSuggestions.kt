@@ -39,6 +39,9 @@ data class CommitResult(
     val undoLastCustom: LastCustom?,
     val touchedPickKey: String? = null,
     val undoPickSnapshot: Long? = null,
+    // Every other set and quick-time slot the commit took votes from, as they were.
+    val undoNearbySets: Map<String, SetStat> = emptyMap(),
+    val undoNearbyTod: Map<String, SetStat> = emptyMap(),
 )
 
 data class SnoozeRow(val epochMillis: Long, val label: String, val score: Double, val key: PatternKey)
@@ -62,7 +65,7 @@ object SnoozeSuggestions {
     private const val SCORE_EPS = 1e-9
     // A key must resolve at least this far ahead of now.
     private const val MIN_LEAD_MS = 60_000L
-    // A picked time discounts another by half its weight at this distance, less further off.
+    // A time this far from a pick gives way by half: half the pick's weight in the menu, half its own votes when the pick is snoozed to.
     private const val NEARBY_HALF_DISTANCE_MINUTES = 30.0
     private const val LITTLE_WHILE_MAX_HOURS = 3
     const val SHOWN_ROWS = 5
@@ -270,6 +273,49 @@ object SnoozeSuggestions {
         return !sameDay && !relative
     }
 
+    /** The share of its votes a time [distanceMinutes] from a snoozed-to time loses, and of a pick's weight it is discounted by. */
+    private fun nearbyShare(distanceMinutes: Double): Double =
+        2.0.pow(-Math.abs(distanceMinutes) / NEARBY_HALF_DISTANCE_MINUTES)
+
+    /** Minutes between two clock times, the short way round midnight. */
+    private fun clockDistance(clockMinutes: Int, other: Int): Int {
+        val apart = Math.abs(clockMinutes - other)
+        return minOf(apart, 24 * 60 - apart)
+    }
+
+    /** The instant of [target]'s 5-minute slot, where the commit's own clock keys resolve. */
+    private fun slotTime(target: Long, zone: ZoneId): Long {
+        val local = LocalDateTime.ofInstant(Instant.ofEpochMilli(target), zone)
+        return onSnoozeDay(snoozeDay(local), slotClockMinutes(slotOf(local)), zone)
+    }
+
+    /** The share of its votes a set loses to a snooze to [targetTime]: the largest among its clock keys resolved at [at], none if one lands exactly there. */
+    private fun nearbySetShare(id: String, at: Instant, targetTime: Long, zone: ZoneId): Double {
+        val times = splitSetId(id).filter { isTimedKey(it) }.mapNotNull { resolveFuture(it, at, zone) }
+        return if (targetTime in times) {
+            0.0
+        } else {
+            times.maxOfOrNull { nearbyShare((it - targetTime) / 60_000.0) } ?: 0.0
+        }
+    }
+
+    /** [entries] with each one's count cut by its [shareOf], paired with the entries that changed, as they were. */
+    private fun takeVotes(
+        entries: Map<String, SetStat>,
+        shareOf: (String) -> Double,
+    ): Pair<Map<String, SetStat>, Map<String, SetStat>> {
+        val next = entries.toMutableMap()
+        val taken = mutableMapOf<String, SetStat>()
+        for ((id, stat) in entries) {
+            val count = stat.c * (1.0 - shareOf(id))
+            if (count != stat.c) {
+                taken[id] = stat
+                next[id] = SetStat(count, stat.t)
+            }
+        }
+        return next to taken
+    }
+
     /** Pure: returns the next state plus exactly what to undo. [pickedKey] is the suggestion row's key, else null. */
     fun commit(
         stats: SnoozeStatsSnapshot,
@@ -291,14 +337,27 @@ object SnoozeSuggestions {
             prevSet = stats.sets[id]
             sets = sets + (id to bump(prevSet, at, setH(keys)))
         }
+        val atInstant = Instant.ofEpochMilli(at)
+        val targetTime = slotTime(target, zone)
+        val (nextSets, nearbySets) = takeVotes(sets) { other ->
+            if (other == id) 0.0 else nearbySetShare(other, atInstant, targetTime, zone)
+        }
+        sets = nextSets
 
         var tod = stats.tod
         var slot: String? = null
         var prevTod: SetStat? = null
+        var nearbyTod = emptyMap<String, SetStat>()
         if (feedsQuickTimes(at, target, zone, source, pickedKey)) {
             slot = slotOf(LocalDateTime.ofInstant(Instant.ofEpochMilli(target), zone))
             prevTod = stats.tod[slot]
             tod = tod + (slot to bump(prevTod, at, TOD_HALF_LIFE_DAYS))
+            val credited = slotClockMinutes(slot)
+            val (nextTod, taken) = takeVotes(tod) { other ->
+                if (other == slot) 0.0 else nearbyShare(clockDistance(slotClockMinutes(other), credited).toDouble())
+            }
+            tod = nextTod
+            nearbyTod = taken
         }
         var picks = stats.picks
         val prevPick = pickLog?.let { stats.picks[it] }
@@ -312,6 +371,8 @@ object SnoozeSuggestions {
             undoLastCustom = stats.lastCustom,
             touchedPickKey = pickLog,
             undoPickSnapshot = prevPick,
+            undoNearbySets = nearbySets,
+            undoNearbyTod = nearbyTod,
         )
     }
 
@@ -354,7 +415,7 @@ object SnoozeSuggestions {
 
     /** Reverts exactly what [result] changed. */
     fun revert(stats: SnoozeStatsSnapshot, result: CommitResult): SnoozeStatsSnapshot {
-        var sets = stats.sets
+        var sets = stats.sets + result.undoNearbySets
         if (result.touchedSetId != null) {
             sets = if (result.undoSetSnapshot != null) {
                 sets + (result.touchedSetId to result.undoSetSnapshot)
@@ -362,7 +423,7 @@ object SnoozeSuggestions {
                 sets - result.touchedSetId
             }
         }
-        var tod = stats.tod
+        var tod = stats.tod + result.undoNearbyTod
         if (result.touchedTodSlot != null) {
             tod = if (result.undoTodSnapshot != null) {
                 tod + (result.touchedTodSlot to result.undoTodSnapshot)
@@ -499,7 +560,7 @@ object SnoozeSuggestions {
 
     /** How much a pick of [weight] discounts a time [distanceMinutes] away from it. */
     private fun nearbyDiscount(weight: Double, distanceMinutes: Double): Double =
-        weight * 2.0.pow(-Math.abs(distanceMinutes) / NEARBY_HALF_DISTANCE_MINUTES)
+        weight * nearbyShare(distanceMinutes)
 
     /** Whether a candidate beats the best so far: higher discounted score, then higher undiscounted score, then [tie]. */
     private inline fun outranks(net: Double, score: Double, bestNet: Double, bestScore: Double, tie: () -> Boolean): Boolean = when {
@@ -599,8 +660,7 @@ object SnoozeSuggestions {
             picked += QuickTime(best, bestWeight)
             weights.remove(best)
             for (clock in weights.keys) {
-                val apart = Math.abs(clock - best)
-                discounts[clock] = (discounts[clock] ?: 0.0) + nearbyDiscount(bestWeight, minOf(apart, 24 * 60 - apart).toDouble())
+                discounts[clock] = (discounts[clock] ?: 0.0) + nearbyDiscount(bestWeight, clockDistance(clock, best).toDouble())
             }
         }
         return picked.sortedBy { it.clockMinutes }
