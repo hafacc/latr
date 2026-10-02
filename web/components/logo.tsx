@@ -1,19 +1,25 @@
 import type { ReactElement, SVGProps } from "react";
 
-export default function Logo(props: SVGProps<SVGSVGElement>): ReactElement {
+const OUTLINE = "M55.49 27.74 L63.32 29.4 L58.94 50 L70 50 L70 58 L49.06 58 Z";
+
+export default function Logo({
+  shadowClassName = "fill-accent-shadow",
+  ...props
+}: SVGProps<SVGSVGElement> & { shadowClassName?: string }): ReactElement {
   return (
     <svg
-      viewBox="49 27 22 32"
+      viewBox="49 27 24 34"
       fill="currentColor"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
       {...props}
     >
-      <g transform="rotate(12 54 54)">
-        <path d="M50 28 L58 28 L58 54 L50 54 Z" />
-      </g>
-      <path d="M54 50 L70 50 L70 58 L54 58 Z" />
-      <path d="M57.91 54.83 L58.94 50 L54 50 L54 58 L49.06 58 L50.09 53.17 Z" />
+      <path
+        d={OUTLINE}
+        transform="translate(2.2 2.2)"
+        className={shadowClassName}
+      />
+      <path d={OUTLINE} />
     </svg>
   );
 }
