@@ -70,16 +70,16 @@ interface SnoozeStatsDao {
     /** One commit's/undo's writes, atomically, so process death can't leave them half-applied. */
     @Transaction
     suspend fun applyCommitChanges(
-        setUpsert: SnoozeSetEntity?,
+        setUpserts: List<SnoozeSetEntity>,
         setDelete: String?,
-        todUpsert: SnoozeTodEntity?,
+        todUpserts: List<SnoozeTodEntity>,
         todDelete: String?,
         pickUpsert: SnoozePickEntity?,
         pickDelete: String?,
     ) {
-        setUpsert?.let { upsertSet(it) }
+        for (set in setUpserts) upsertSet(set)
         setDelete?.let { deleteSet(it) }
-        todUpsert?.let { upsertTod(it) }
+        for (slot in todUpserts) upsertTod(slot)
         todDelete?.let { deleteTod(it) }
         pickUpsert?.let { upsertPick(it) }
         pickDelete?.let { deletePick(it) }

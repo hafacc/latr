@@ -253,15 +253,15 @@ class SnoozeSuggestionsTest {
     }
 
     @Test
-    fun `the most-used exact slot ranks first and a 5-minute neighbour gives way to its other reading`() {
+    fun `a snooze five minutes from a habit takes most of its votes and ranks first`() {
         var stats = SnoozeStatsSnapshot()
         var day = LocalDateTime.of(2024, 1, 1, 10, 0)
         for (m in listOf(0, 0, 0, 5)) {
             stats = commitOnce(stats, day, day.plusDays(1).withHour(8).withMinute(m)).next
             day = day.plusDays(1)
         }
-        val rows = SnoozeSuggestions.rank(listOf(stats), instant(day), zone)
-        assertEquals(listOf("D0@0800", "Wd5@0805"), rows.map { it.key })
+        val rows = SnoozeSuggestions.rankDeep(listOf(stats), instant(day), zone)
+        assertEquals("D0@0805", rows.first().key)
     }
 
     @Test
