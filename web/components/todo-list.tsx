@@ -38,7 +38,10 @@ export default function TodoList(): ReactElement {
       : emptyCopy(filter);
     return (
       <div className="flex flex-col items-center text-center py-20 gap-2">
-        <Logo className="w-8 h-10 text-border mb-2" />
+        <Logo
+          className="w-8 h-10 text-border mb-2"
+          shadowClassName="fill-border-strong"
+        />
         <div className="text-[15px] text-text">{title}</div>
         <div className="text-[13px] text-text-secondary">{hint}</div>
       </div>
