@@ -4,6 +4,13 @@ updates:
     directory: /web
     schedule:
       interval: monthly
+    groups:
+      react:
+        patterns:
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
   - package-ecosystem: gradle
     directory: /android
     schedule:

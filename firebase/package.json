@@ -7,6 +7,6 @@
     "set-admin": "bun scripts/set-admin.ts"
   },
   "devDependencies": {
-    "firebase-admin": "^13.10.0"
+    "firebase-admin": "^14.5.0"
   }
 }
