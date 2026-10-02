@@ -57,7 +57,7 @@ object SnoozeSuggestions {
     private const val MS_PER_DAY = 24.0 * 60 * 60 * 1000
     private const val SHORT_HALF_LIFE_DAYS = 21L
     private const val LONG_HALF_LIFE_DAYS = 60L
-    private const val TOD_HALF_LIFE_DAYS = 21L
+    const val TOD_HALF_LIFE_DAYS = 21L
     const val SLOT_MINUTES = 5
     private const val DAY_BOUNDARY_HOUR = 5L
     const val DEFAULT_FLOOR = 0.05
@@ -228,7 +228,7 @@ object SnoozeSuggestions {
     /** A set's half-life is the longest among its members'. */
     private fun setH(members: Set<PatternKey>): Long = members.maxOf { classHForKey(it) }
 
-    private fun setH(id: String): Long = setH(splitSetId(id))
+    fun setH(id: String): Long = setH(splitSetId(id))
 
     fun setId(keys: Set<PatternKey>): String = keys.sorted().joinToString("__")
 

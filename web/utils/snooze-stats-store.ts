@@ -1,8 +1,23 @@
 "use client";
 
-import { doc, increment, onSnapshot, setDoc } from "firebase/firestore";
+import {
+  deleteField,
+  doc,
+  increment,
+  onSnapshot,
+  runTransaction,
+  setDoc,
+} from "firebase/firestore";
 import { db } from "./firebase";
-import { fromWire, toWire } from "./snooze-stats-wire";
+import {
+  foldBlocks,
+  fromWire,
+  negated,
+  sharedFromWire,
+  toWire,
+  type VoteDeltas,
+  voteDeltas,
+} from "./snooze-stats-wire";
 import {
   type CommitUndoSnapshot,
   commit as commitPure,
@@ -14,48 +29,37 @@ import {
 
 const STORAGE_KEY = "latr:snooze-stats:v2";
 const LEGACY_STORAGE_KEY = "latr:snooze-stats:v1";
-const DEVICE_ID_KEY = "latr:device-id:v1";
-const OWNER_UID_KEY = "latr:snooze-stats-owner:v1";
+// Left by builds that kept a block of counts per device.
+const LEGACY_DEVICE_ID_KEY = "latr:device-id:v1";
+const LEGACY_OWNER_UID_KEY = "latr:snooze-stats-owner:v1";
 const BASE_RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 30_000;
 
-function getOrCreateDeviceId(): string {
-  if (typeof localStorage === "undefined") return crypto.randomUUID();
-  try {
-    const existing = localStorage.getItem(DEVICE_ID_KEY);
-    if (existing) return existing;
-    const id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_ID_KEY, id);
-    return id;
-  } catch {
-    return crypto.randomUUID();
-  }
+// `deltas` is what a signed-in commit added to the shared counts; null for a signed-out one.
+export type SnoozeUndo = {
+  snapshot: CommitUndoSnapshot;
+  deltas: VoteDeltas | null;
+  custom: boolean;
+};
+
+type UserDoc = {
+  snoozeVotes?: { folded?: unknown; lastCustom?: unknown };
+  snoozeStats?: unknown;
+  snoozePickLog?: unknown;
+};
+
+function increments(deltas: Record<string, number>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(deltas).map(([id, amount]) => [id, increment(amount)]),
+  );
 }
 
-function readOwnerUid(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  try {
-    return localStorage.getItem(OWNER_UID_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeOwnerUid(uid: string): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(OWNER_UID_KEY, uid);
-  } catch {
-    // best-effort
-  }
-}
-
-/** Tabs share one device id, so localStorage, not this object, holds the truth for the local partition. */
+/** Signed in, the counts are the account's `snoozeVotes`, changed only by adding amounts; signed out, a copy in localStorage shared by every tab. */
 export class SnoozeStatsStore {
-  private local: DevicePartition;
-  private remote = new Map<string, DevicePartition>();
+  private local: DevicePartition = emptyPartition("local");
+  private shared: DevicePartition = emptyPartition("shared");
   // Stable between changes: useSyncExternalStore loops forever on a fresh array.
-  private partitionsCache: DevicePartition[];
+  private partitionsCache: DevicePartition[] = [this.local];
   private listeners = new Set<() => void>();
   private unsubDoc: (() => void) | null = null;
   private uid: string | null = null;
@@ -64,31 +68,28 @@ export class SnoozeStatsStore {
   private onStorage: ((e: StorageEvent) => void) | null = null;
   // `users/{uid}.snoozePickLog`; null while signed out or before the first snapshot.
   private pickLog: boolean | null = null;
-
-  constructor() {
-    this.local = emptyPartition(getOrCreateDeviceId());
-    this.partitionsCache = [this.local];
-  }
+  private folding = false;
 
   private rebuildPartitionsCache(): void {
-    this.partitionsCache = [this.local, ...this.remote.values()];
+    this.partitionsCache = [this.uid ? this.shared : this.local];
   }
 
   hydrate(): void {
     try {
       localStorage.removeItem(LEGACY_STORAGE_KEY);
+      // Counts saved while signed in are that account's device block, which is folded into its shared counts.
+      if (localStorage.getItem(LEGACY_OWNER_UID_KEY) !== null) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LEGACY_OWNER_UID_KEY);
+      }
+      localStorage.removeItem(LEGACY_DEVICE_ID_KEY);
     } catch {
       // best-effort
     }
     this.reloadFromStorage();
     if (typeof window !== "undefined" && this.onStorage === null) {
       this.onStorage = (e) => {
-        if (
-          e.key === null ||
-          e.key === STORAGE_KEY ||
-          e.key === DEVICE_ID_KEY ||
-          e.key === OWNER_UID_KEY
-        ) {
+        if (e.key === null || e.key === STORAGE_KEY) {
           this.reloadFromStorage();
           this.rebuildPartitionsCache();
           this.emit();
@@ -115,21 +116,13 @@ export class SnoozeStatsStore {
     return this.pickLog === true;
   }
 
-  /** Per user, so it covers every device; turning it off also clears this device's picks. */
+  /** Per user, so it covers every device; turning it off also clears the saved picks. */
   setPickLog(enabled: boolean): void {
     if (!this.uid) return;
     this.pickLog = enabled;
     const fields: Record<string, unknown> = { snoozePickLog: enabled };
-    const mergeFields = ["snoozePickLog"];
-    if (!enabled) {
-      this.syncLocal();
-      this.local = { ...this.local, picks: {} };
-      this.rebuildPartitionsCache();
-      this.persistNow();
-      fields.snoozeStats = { [this.local.deviceId]: toWire(this.local) };
-      mergeFields.push(`snoozeStats.${this.local.deviceId}`);
-    }
-    void setDoc(doc(db(), "users", this.uid), fields, { mergeFields }).catch(
+    if (!enabled) fields.snoozeVotes = { picks: deleteField() };
+    void setDoc(doc(db(), "users", this.uid), fields, { merge: true }).catch(
       (e) => console.error("snooze pick log toggle failed", e),
     );
     this.emit();
@@ -141,47 +134,67 @@ export class SnoozeStatsStore {
     source: SnoozeSource,
     pickedKey: string | null = null,
     pickLogKey: string | null = null,
-  ): CommitUndoSnapshot {
-    this.syncLocal();
-    const result = commitPure(
-      this.local,
-      at,
-      target,
-      source,
-      pickedKey,
-      this.uid && this.pickLog === true ? pickLogKey : null,
-    );
-    this.local = result.next;
-    this.afterLocalChange();
-    if (result.undoSnapshot.pick)
-      this.bumpGlobalPick(result.undoSnapshot.pick.key, 1);
-    return result.undoSnapshot;
+  ): SnoozeUndo {
+    const custom = source === "custom";
+    if (this.uid) {
+      const result = commitPure(
+        this.shared,
+        at,
+        target,
+        source,
+        pickedKey,
+        this.pickLog === true ? pickLogKey : null,
+      );
+      const deltas = voteDeltas(this.shared, result.next);
+      const pick = result.undoSnapshot.pick;
+      this.setShared(result.next);
+      this.addVotes(this.uid, deltas, {
+        ...(custom ? { lastCustom: result.next.lastCustom } : {}),
+        ...(pick ? { picks: { [pick.key]: increment(1) } } : {}),
+      });
+      if (pick) this.bumpGlobalPick(pick.key, 1);
+      return { snapshot: result.undoSnapshot, deltas, custom };
+    } else {
+      this.reloadFromStorage();
+      const result = commitPure(this.local, at, target, source, pickedKey);
+      this.setLocal(result.next);
+      return { snapshot: result.undoSnapshot, deltas: null, custom };
+    }
   }
 
-  undo(snapshot: CommitUndoSnapshot): void {
-    this.syncLocal();
-    this.local = undoCommitPure(this.local, snapshot);
-    this.afterLocalChange();
-    if (snapshot.pick) this.bumpGlobalPick(snapshot.pick.key, -1);
+  undo(undo: SnoozeUndo): void {
+    const { snapshot, deltas, custom } = undo;
+    if (deltas === null) {
+      if (this.uid) return;
+      this.reloadFromStorage();
+      this.setLocal(undoCommitPure(this.local, snapshot));
+    } else if (this.uid) {
+      const logged = snapshot.pick !== null && this.pickLog === true;
+      this.setShared(undoCommitPure(this.shared, snapshot));
+      this.addVotes(this.uid, negated(deltas), {
+        ...(custom ? { lastCustom: snapshot.prevLastCustom } : {}),
+        ...(snapshot.pick && logged
+          ? { picks: { [snapshot.pick.key]: increment(-1) } }
+          : {}),
+      });
+      if (snapshot.pick) this.bumpGlobalPick(snapshot.pick.key, -1);
+    }
   }
 
-  /** Sign-in: push the whole local partition once (user-initiated, like mergeLocalIntoFirestore). */
+  /** Sign-in: add the counts learned while signed out to the account's, once (user-initiated, like mergeLocalIntoFirestore). */
   async pushToRemote(uid: string): Promise<void> {
-    this.ensureOwner(uid);
-    this.dropPicksIfOff();
-    await setDoc(
-      doc(db(), "users", uid),
-      { snoozeStats: { [this.local.deviceId]: toWire(this.local) } },
-      { mergeFields: [`snoozeStats.${this.local.deviceId}`] },
-    );
+    this.reloadFromStorage();
+    const deltas = voteDeltas(emptyPartition("local"), this.local);
+    this.setLocal(emptyPartition("local"));
+    await this.writeVotes(uid, deltas, {});
   }
 
   attachRemote(uid: string): void {
     if (this.uid === uid && (this.unsubDoc || this.retryTimer)) return;
     this.detachRemote();
-    this.ensureOwner(uid);
     this.uid = uid;
     this.retryAttempt = 0;
+    this.rebuildPartitionsCache();
     this.startListening(uid);
   }
 
@@ -199,19 +212,11 @@ export class SnoozeStatsStore {
       (snap) => {
         // A server-confirmed emission means the listener is healthy again.
         if (!snap.metadata.fromCache) this.retryAttempt = 0;
-        const data = snap.data() as
-          | { snoozeStats?: Record<string, unknown>; snoozePickLog?: unknown }
-          | undefined;
+        const data = snap.data() as UserDoc | undefined;
         this.pickLog = data?.snoozePickLog === true;
-        const stats = data?.snoozeStats ?? {};
-        // Our own partition comes from localStorage, which is always at least as new.
-        this.remote = new Map(
-          Object.entries(stats)
-            .filter(([id]) => id !== this.local.deviceId)
-            .map(([id, raw]) => [id, fromWire(id, raw)] as const),
-        );
-        this.rebuildPartitionsCache();
-        this.emit();
+        this.setShared(sharedFromWire(data?.snoozeVotes));
+        if (foldBlocks(data?.snoozeStats, data?.snoozeVotes?.folded).ids.length)
+          this.foldDeviceBlocks(uid);
       },
       (err) => {
         // A delivered error terminates the listener for good.
@@ -220,6 +225,41 @@ export class SnoozeStatsStore {
         this.scheduleReattach(uid);
       },
     );
+  }
+
+  /** Adds the blocks older builds saved per device to the shared counts, once each. A transaction, so two devices can't both add one; a block an old build saves again afterwards is ignored. */
+  private foldDeviceBlocks(uid: string): void {
+    if (this.folding) return;
+    this.folding = true;
+    const ref = doc(db(), "users", uid);
+    void runTransaction(db(), async (tx) => {
+      const data = (await tx.get(ref)).data() as UserDoc | undefined;
+      const fold = foldBlocks(data?.snoozeStats, data?.snoozeVotes?.folded);
+      if (fold.ids.length === 0) return;
+      const current = sharedFromWire(data?.snoozeVotes).lastCustom;
+      const newer =
+        fold.lastCustom && (!current || fold.lastCustom.at > current.at);
+      tx.set(
+        ref,
+        {
+          snoozeVotes: {
+            sets: increments(fold.deltas.sets),
+            tod: increments(fold.deltas.tod),
+            folded: Object.fromEntries(fold.ids.map((id) => [id, true])),
+            ...(newer ? { lastCustom: fold.lastCustom } : {}),
+            ...(data?.snoozePickLog === true
+              ? { picks: increments(fold.picks) }
+              : {}),
+          },
+          snoozeStats: deleteField(),
+        },
+        { merge: true },
+      );
+    })
+      .catch((e) => console.error("snooze-stats fold failed", e))
+      .finally(() => {
+        this.folding = false;
+      });
   }
 
   private scheduleReattach(uid: string): void {
@@ -235,41 +275,15 @@ export class SnoozeStatsStore {
     }, backoff);
   }
 
-  /** A different account gets a fresh partition under a new id, so the old account's copy is never overwritten. */
-  private ensureOwner(uid: string): void {
-    this.reloadFromStorage();
-    const owner = readOwnerUid();
-    if (owner !== null && owner !== uid) {
-      const deviceId = crypto.randomUUID();
-      try {
-        localStorage.setItem(DEVICE_ID_KEY, deviceId);
-      } catch {
-        // best-effort
-      }
-      this.local = emptyPartition(deviceId);
-      this.persistNow();
-      this.rebuildPartitionsCache();
-      this.emit();
-    }
-    writeOwnerUid(uid);
-  }
-
-  private syncLocal(): void {
-    if (this.uid) this.ensureOwner(this.uid);
-    else this.reloadFromStorage();
-  }
-
   private reloadFromStorage(): void {
     if (typeof localStorage === "undefined") return;
     try {
-      const deviceId =
-        localStorage.getItem(DEVICE_ID_KEY) ?? this.local.deviceId;
       const raw = localStorage.getItem(STORAGE_KEY);
       this.local = raw
-        ? fromWire(deviceId, JSON.parse(raw))
-        : emptyPartition(deviceId);
+        ? fromWire("local", JSON.parse(raw))
+        : emptyPartition("local");
     } catch {
-      // keep the in-memory partition
+      // keep the in-memory copy
     }
   }
 
@@ -284,7 +298,7 @@ export class SnoozeStatsStore {
     }
     this.uid = null;
     this.pickLog = null;
-    this.remote = new Map();
+    this.shared = emptyPartition("shared");
     this.rebuildPartitionsCache();
   }
 
@@ -297,31 +311,53 @@ export class SnoozeStatsStore {
     this.listeners.clear();
   }
 
-  private dropPicksIfOff(): void {
-    if (this.pickLog === false && Object.keys(this.local.picks).length > 0) {
-      this.local = { ...this.local, picks: {} };
-      this.persistNow();
-    }
-  }
-
-  private afterLocalChange(): void {
-    this.dropPicksIfOff();
+  private setShared(next: DevicePartition): void {
+    this.shared = next;
     this.rebuildPartitionsCache();
-    this.persistNow();
-    this.mirror();
     this.emit();
   }
 
-  private mirror(): void {
-    if (!this.uid) return;
-    void setDoc(
-      doc(db(), "users", this.uid),
-      { snoozeStats: { [this.local.deviceId]: toWire(this.local) } },
-      { mergeFields: [`snoozeStats.${this.local.deviceId}`] },
-    ).catch((e) => console.error("snooze-stats mirror failed", e));
+  private setLocal(next: DevicePartition): void {
+    this.local = { ...next, picks: {} };
+    this.rebuildPartitionsCache();
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(toWire(this.local)));
+      } catch {
+        // best-effort
+      }
+    }
+    this.emit();
   }
 
-  /** Separate from the partition write so a rules rejection can't cost the user's stats. */
+  private addVotes(
+    uid: string,
+    deltas: VoteDeltas,
+    extra: Record<string, unknown>,
+  ): void {
+    void this.writeVotes(uid, deltas, extra).catch((e) =>
+      console.error("snooze-stats write failed", e),
+    );
+  }
+
+  /** Amounts are added on the server (and to the cached copy while offline), so nothing another device wrote is overwritten. */
+  private async writeVotes(
+    uid: string,
+    deltas: VoteDeltas,
+    extra: Record<string, unknown>,
+  ): Promise<void> {
+    const votes: Record<string, unknown> = { ...extra };
+    if (Object.keys(deltas.sets).length) votes.sets = increments(deltas.sets);
+    if (Object.keys(deltas.tod).length) votes.tod = increments(deltas.tod);
+    if (Object.keys(votes).length === 0) return;
+    await setDoc(
+      doc(db(), "users", uid),
+      { snoozeVotes: votes },
+      { merge: true },
+    );
+  }
+
+  /** Separate from the votes write so a rules rejection can't cost the user's counts. */
   private bumpGlobalPick(key: string, delta: 1 | -1): void {
     if (!this.uid || this.pickLog !== true) return;
     // `key` names the bumped field, since rules can't pull it out of the changed-field set.
@@ -330,15 +366,6 @@ export class SnoozeStatsStore {
       { [key]: increment(delta), key },
       { merge: true },
     ).catch((e) => console.error("global snooze pick log failed", e));
-  }
-
-  private persistNow(): void {
-    if (typeof localStorage === "undefined") return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(toWire(this.local)));
-    } catch {
-      // best-effort
-    }
   }
 
   private emit(): void {

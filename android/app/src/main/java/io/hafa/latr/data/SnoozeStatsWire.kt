@@ -5,9 +5,88 @@ import io.hafa.latr.util.SetStat
 import io.hafa.latr.util.SnoozeStatsSnapshot
 import io.hafa.latr.util.SnoozeSuggestions
 import java.time.ZoneId
+import kotlin.math.pow
 
-/** One device partition as stored at `users/{uid}.snoozeStats.<deviceId>`, shared with web. */
+/** Amounts to add to the shared counts, in their scaled units. */
+data class VoteDeltas(val sets: Map<String, Double> = emptyMap(), val tod: Map<String, Double> = emptyMap()) {
+    fun negated() = VoteDeltas(sets.mapValues { -it.value }, tod.mapValues { -it.value })
+}
+
+/** What [SnoozeStatsWire.foldBlocks] adds to the shared counts; [ids] are the device blocks it covers. */
+data class Fold(val ids: List<String>, val deltas: VoteDeltas, val picks: Map<String, Long>, val lastCustom: LastCustom?)
+
+/** The shared counts at `users/{uid}.snoozeVotes`, and the per-device blocks older builds saved under `snoozeStats`; shared with web. */
 object SnoozeStatsWire {
+
+    // A user's shared counts are saved scaled up by how late each vote was cast, doubling every half-life from this instant (2026-01-01 UTC), so a vote is a plain addition and no time is saved. Doubles overflow about 59 years on.
+    const val VOTE_EPOCH = 1_767_225_600_000L
+
+    private const val MS_PER_DAY = 24.0 * 60 * 60 * 1000
+
+    private fun scaled(stat: SetStat?, halfLifeDays: Long): Double =
+        if (stat == null) 0.0 else stat.c * 2.0.pow((stat.t - VOTE_EPOCH) / MS_PER_DAY / halfLifeDays)
+
+    private fun sharedCounters(raw: Any?, validKey: (String) -> Boolean): Map<String, SetStat> =
+        entries(raw).mapNotNull { (k, v) ->
+            val count = finite(v) ?: return@mapNotNull null
+            if (validKey(k) && count > 0) k to SetStat(count, VOTE_EPOCH) else null
+        }.toMap()
+
+    /** Each scaled count reads as that count at [VOTE_EPOCH]; counts at or below 0 are dropped. */
+    fun sharedFromWire(raw: Map<*, *>?): SnoozeStatsSnapshot {
+        if (raw == null) return SnoozeStatsSnapshot()
+        return SnoozeStatsSnapshot(
+            sets = sharedCounters(raw["sets"]) { SnoozeSuggestions.isValidSetId(it) },
+            tod = sharedCounters(raw["tod"]) { SnoozeSuggestions.SLOT_RE.matches(it) },
+            lastCustom = lastCustom(raw["lastCustom"]),
+            picks = picks(raw["picks"]),
+        )
+    }
+
+    private fun counterDeltas(
+        before: Map<String, SetStat>,
+        after: Map<String, SetStat>,
+        halfLifeOf: (String) -> Long,
+    ): Map<String, Double> =
+        (before.keys + after.keys).mapNotNull { id ->
+            if (before[id] == after[id]) return@mapNotNull null
+            val halfLife = halfLifeOf(id)
+            val delta = scaled(after[id], halfLife) - scaled(before[id], halfLife)
+            if (delta != 0.0) id to delta else null
+        }.toMap()
+
+    /** What to add to the shared counts to take them from [before] to [after]. */
+    fun voteDeltas(before: SnoozeStatsSnapshot, after: SnoozeStatsSnapshot) = VoteDeltas(
+        sets = counterDeltas(before.sets, after.sets) { SnoozeSuggestions.setH(it) },
+        tod = counterDeltas(before.tod, after.tod) { SnoozeSuggestions.TOD_HALF_LIFE_DAYS },
+    )
+
+    /** The per-device blocks older builds saved, summed for adding to the shared counts; blocks named in [folded] were added before and are skipped. */
+    fun foldBlocks(stats: Map<*, *>?, folded: Map<*, *>?, zone: ZoneId = ZoneId.systemDefault()): Fold {
+        val ids = mutableListOf<String>()
+        val sets = mutableMapOf<String, Double>()
+        val tod = mutableMapOf<String, Double>()
+        val picks = mutableMapOf<String, Long>()
+        var lastCustom: LastCustom? = null
+        for ((id, raw) in entries(stats)) {
+            if (folded?.get(id) == true) continue
+            val block = fromWire(raw as? Map<*, *>, zone)
+            val deltas = voteDeltas(SnoozeStatsSnapshot(), block)
+            ids += id
+            for ((setId, amount) in deltas.sets) sets[setId] = (sets[setId] ?: 0.0) + amount
+            for ((slot, amount) in deltas.tod) tod[slot] = (tod[slot] ?: 0.0) + amount
+            for ((pick, count) in block.picks) picks[pick] = (picks[pick] ?: 0L) + count
+            val custom = block.lastCustom
+            if (custom != null && (lastCustom == null || custom.at > lastCustom.at)) lastCustom = custom
+        }
+        return Fold(ids, VoteDeltas(sets, tod), picks, lastCustom)
+    }
+
+    private fun lastCustom(raw: Any?): LastCustom? = (raw as? Map<*, *>)?.let {
+        val target = finite(it["target"])
+        val at = finite(it["at"])
+        if (target != null && at != null) LastCustom(target.toLong(), at.toLong()) else null
+    }
 
     // Partitions without it were saved before clock keys counted from their first hit, and are upgraded on read.
     const val PARTITION_VERSION = 2
@@ -27,12 +106,7 @@ object SnoozeStatsWire {
         val current = (finite(raw["v"]) ?: 0.0) >= PARTITION_VERSION
         val sets = if (current) parsed else SnoozeSuggestions.upgradeLegacySets(parsed, zone)
         val tod = counters(raw["tod"]) { SnoozeSuggestions.SLOT_RE.matches(it) }
-        val lastCustom = (raw["lastCustom"] as? Map<*, *>)?.let {
-            val target = finite(it["target"])
-            val at = finite(it["at"])
-            if (target != null && at != null) LastCustom(target.toLong(), at.toLong()) else null
-        }
-        return SnoozeStatsSnapshot(sets, tod, lastCustom, picks(raw["picks"]))
+        return SnoozeStatsSnapshot(sets, tod, lastCustom(raw["lastCustom"]), picks(raw["picks"]))
     }
 
     /** `snoozePickLog/global` as 21 counts: index 0 is `none`, 1..20 the ranks; missing or non-integer fields read 0. */

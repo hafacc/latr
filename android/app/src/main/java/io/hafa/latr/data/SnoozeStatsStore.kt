@@ -1,7 +1,6 @@
 package io.hafa.latr.data
 
 import android.util.Log
-import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -28,7 +27,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-/** This device's snooze-learning partition (Room), mirrored whole to `users/{uid}.snoozeStats.<deviceId>`; in-memory state is main-thread only. */
+/** [deltas] is what a signed-in commit added to the shared counts; null for a signed-out one. */
+data class SnoozeUndo(val result: CommitResult, val deltas: VoteDeltas?, val custom: Boolean)
+
+/** Signed in, the counts are the account's `users/{uid}.snoozeVotes`, changed only by adding amounts; signed out, this device's own in Room. In-memory state is main-thread only. */
 class SnoozeStatsStore(
     private val dao: SnoozeStatsDao,
     private val userPreferences: UserPreferences,
@@ -42,21 +44,21 @@ class SnoozeStatsStore(
         null
     }
 
-    val deviceId: String get() = userPreferences.deviceId
-
     fun currentUidOrNull(): String? = authManager?.currentUser?.value?.uid
 
     private val _local = MutableStateFlow(SnoozeStatsSnapshot())
-    private val _remote = MutableStateFlow<Map<String, SnoozeStatsSnapshot>>(emptyMap())
+    private val _shared = MutableStateFlow(SnoozeStatsSnapshot())
+    private val _signedIn = MutableStateFlow(false)
     private var remoteListener: ListenerRegistration? = null
+    private var folding = false
 
     // `users/{uid}.snoozePickLog`; null while signed out or before the first snapshot.
     private val _pickLog = MutableStateFlow<Boolean?>(null)
     val pickLog: StateFlow<Boolean?> = _pickLog
 
-    /** This device's partition plus every other device's, ready to feed [SnoozeSuggestions.rank]. */
+    /** The counts to feed [SnoozeSuggestions.rank]: the account's while signed in, else this device's. */
     val partitions: StateFlow<List<SnoozeStatsSnapshot>> =
-        combine(_local, _remote) { local, remote -> listOf(local) + remote.values }
+        combine(_local, _shared, _signedIn) { local, shared, signedIn -> listOf(if (signedIn) shared else local) }
             .stateIn(scope, SharingStarted.WhileSubscribed(5000), listOf(SnoozeStatsSnapshot()))
 
     private val loaded = CompletableDeferred<Unit>()
@@ -91,10 +93,15 @@ class SnoozeStatsStore(
     }
 
     private suspend fun loadLocal(): SnoozeStatsSnapshot {
-        // Counters restored from a backup without their identity would double-count another device's partition.
-        if (userPreferences.snoozeIdentityWasMissing) {
+        // Counts restored from a backup, or saved while signed in by a build that kept a block per device, are already in an account's counts.
+        if (userPreferences.snoozeIdentityWasMissing || userPreferences.snoozeStatsOwnerUid != null) {
             dao.clearAll()
+            userPreferences.lastCustomTarget = null
+            userPreferences.lastCustomAt = null
+            userPreferences.snoozeStatsOwnerUid = null
             userPreferences.snoozeSetsVersion = SnoozeStatsWire.PARTITION_VERSION
+            // Creates the identity whose absence marks a restore.
+            userPreferences.deviceId
             return SnoozeStatsSnapshot()
         }
         var sets = dao.getAllSets()
@@ -111,10 +118,7 @@ class SnoozeStatsStore(
         val lastCustom = userPreferences.lastCustomTarget?.let { target ->
             userPreferences.lastCustomAt?.let { at -> LastCustom(target, at) }
         }
-        val picks = dao.getAllPicks()
-            .filter { SnoozeSuggestions.PICK_RE.matches(it.pick) && it.n > 0 }
-            .associate { it.pick to it.n }
-        return SnoozeStatsSnapshot(sets, tod, lastCustom, picks)
+        return SnoozeStatsSnapshot(sets, tod, lastCustom)
     }
 
     private var retryAttempt = 0
@@ -123,22 +127,9 @@ class SnoozeStatsStore(
     private fun attachRemote(uid: String) {
         if (firestore == null) return
         detachRemote()
-        ensureOwner(uid)
+        _signedIn.value = true
         retryAttempt = 0
         startListening(uid)
-    }
-
-    /** A different account gets a new device id too, or switching back would overwrite its old partition with an empty one. */
-    private fun ensureOwner(uid: String) {
-        val owner = userPreferences.snoozeStatsOwnerUid
-        if (owner != null && owner != uid) {
-            _local.value = SnoozeStatsSnapshot()
-            userPreferences.lastCustomTarget = null
-            userPreferences.lastCustomAt = null
-            roomWrites.trySend { dao.clearAll() }
-            userPreferences.rotateDeviceId()
-        }
-        userPreferences.snoozeStatsOwnerUid = uid
     }
 
     /** A delivered error ends the listener; re-register with capped backoff, like [FirestoreTodoStore]. */
@@ -154,11 +145,44 @@ class SnoozeStatsStore(
             }
             retryAttempt = 0
             _pickLog.value = snap?.get("snoozePickLog") == true
-            val raw = snap?.get("snoozeStats") as? Map<*, *> ?: emptyMap<String, Any?>()
-            val myId = deviceId
-            _remote.value = raw.entries
-                .filter { (k, _) -> k is String && k != myId }
-                .associate { (k, v) -> (k as String) to SnoozeStatsWire.fromWire(v as? Map<*, *>, zoneProvider()) }
+            val votes = snap?.get("snoozeVotes") as? Map<*, *>
+            _shared.value = SnoozeStatsWire.sharedFromWire(votes)
+            val blocks = snap?.get("snoozeStats") as? Map<*, *>
+            if (SnoozeStatsWire.foldBlocks(blocks, votes?.get("folded") as? Map<*, *>, zoneProvider()).ids.isNotEmpty()) {
+                foldDeviceBlocks(uid)
+            }
+        }
+    }
+
+    /** Adds the blocks older builds saved per device to the shared counts, once each. A transaction, so two devices can't both add one; a block an old build saves again afterwards is ignored. */
+    private fun foldDeviceBlocks(uid: String) {
+        val fs = firestore ?: return
+        if (folding) return
+        folding = true
+        val doc = fs.collection("users").document(uid)
+        val zone = zoneProvider()
+        fs.runTransaction { tx ->
+            val snap = tx.get(doc)
+            val votes = snap.get("snoozeVotes") as? Map<*, *>
+            val fold = SnoozeStatsWire.foldBlocks(snap.get("snoozeStats") as? Map<*, *>, votes?.get("folded") as? Map<*, *>, zone)
+            if (fold.ids.isNotEmpty()) {
+                val current = SnoozeStatsWire.sharedFromWire(votes).lastCustom
+                val newer = fold.lastCustom?.takeIf { current == null || it.at > current.at }
+                val payload = mutableMapOf<String, Any?>(
+                    "sets" to increments(fold.deltas.sets),
+                    "tod" to increments(fold.deltas.tod),
+                    "folded" to fold.ids.associateWith { true },
+                )
+                if (newer != null) payload["lastCustom"] = lastCustomWire(newer)
+                if (snap.get("snoozePickLog") == true) {
+                    payload["picks"] = fold.picks.mapValues { FieldValue.increment(it.value) }
+                }
+                tx.set(doc, mapOf("snoozeVotes" to payload, "snoozeStats" to FieldValue.delete()), SetOptions.merge())
+            }
+            null
+        }.addOnCompleteListener { task ->
+            folding = false
+            task.exception?.let { Log.w(TAG, "snoozeStats fold failed", it) }
         }
     }
 
@@ -178,41 +202,63 @@ class SnoozeStatsStore(
         remoteListener = null
         retryJob?.cancel()
         retryJob = null
-        _remote.value = emptyMap()
+        _signedIn.value = false
+        _shared.value = SnoozeStatsSnapshot()
         _pickLog.value = null
     }
 
     /** [pickLogKey] is counted only while signed in and opted in. */
-    suspend fun commit(at: Long, target: Long, source: String, pickedKey: String?, pickLogKey: String?): CommitResult =
+    suspend fun commit(at: Long, target: Long, source: String, pickedKey: String?, pickLogKey: String?): SnoozeUndo =
         withContext(Dispatchers.Main.immediate) {
             loaded.await()
             val uid = currentUidOrNull()
-            uid?.let { ensureOwner(it) }
-            val pickLogged = if (uid != null && _pickLog.value == true) pickLogKey else null
-            val result = SnoozeSuggestions.commit(_local.value, at, target, zoneProvider(), source, pickedKey, pickLogged)
-            _local.value = result.next
-            roomWrites.trySend { persist(result) }
-            if (source == "custom") {
-                userPreferences.lastCustomTarget = target
-                userPreferences.lastCustomAt = at
+            val custom = source == "custom"
+            if (uid != null) {
+                val before = _shared.value
+                val pickLogged = if (_pickLog.value == true) pickLogKey else null
+                val result = SnoozeSuggestions.commit(before, at, target, zoneProvider(), source, pickedKey, pickLogged)
+                val deltas = SnoozeStatsWire.voteDeltas(before, result.next)
+                _shared.value = result.next
+                val extra = mutableMapOf<String, Any?>()
+                if (custom) extra["lastCustom"] = lastCustomWire(result.next.lastCustom)
+                result.touchedPickKey?.let { extra["picks"] = mapOf(it to FieldValue.increment(1L)) }
+                addVotes(uid, deltas, extra)
+                result.touchedPickKey?.let { bumpGlobalPick(it, 1) }
+                SnoozeUndo(result, deltas, custom)
+            } else {
+                val result = SnoozeSuggestions.commit(_local.value, at, target, zoneProvider(), source, pickedKey, null)
+                _local.value = result.next
+                roomWrites.trySend { persist(result) }
+                if (custom) {
+                    userPreferences.lastCustomTarget = target
+                    userPreferences.lastCustomAt = at
+                }
+                SnoozeUndo(result, null, custom)
             }
-            mirror()
-            result.touchedPickKey?.let { bumpGlobalPick(it, 1) }
-            result
         }
 
-    suspend fun undo(result: CommitResult) = withContext(Dispatchers.Main.immediate) {
+    suspend fun undo(undo: SnoozeUndo) = withContext(Dispatchers.Main.immediate) {
         loaded.await()
-        currentUidOrNull()?.let { ensureOwner(it) }
-        _local.value = SnoozeSuggestions.revert(_local.value, result)
-        roomWrites.trySend { persistRevert(result) }
-        userPreferences.lastCustomTarget = result.undoLastCustom?.target
-        userPreferences.lastCustomAt = result.undoLastCustom?.at
-        mirror()
-        result.touchedPickKey?.let { bumpGlobalPick(it, -1) }
+        val result = undo.result
+        val uid = currentUidOrNull()
+        if (undo.deltas == null) {
+            if (uid != null) return@withContext
+            _local.value = SnoozeSuggestions.revert(_local.value, result)
+            roomWrites.trySend { persistRevert(result) }
+            userPreferences.lastCustomTarget = result.undoLastCustom?.target
+            userPreferences.lastCustomAt = result.undoLastCustom?.at
+        } else if (uid != null) {
+            _shared.value = SnoozeSuggestions.revert(_shared.value, result)
+            val extra = mutableMapOf<String, Any?>()
+            if (undo.custom) extra["lastCustom"] = lastCustomWire(result.undoLastCustom)
+            val pick = result.touchedPickKey
+            if (pick != null && _pickLog.value == true) extra["picks"] = mapOf(pick to FieldValue.increment(-1L))
+            addVotes(uid, undo.deltas.negated(), extra)
+            pick?.let { bumpGlobalPick(it, -1) }
+        }
     }
 
-    /** Separate from the partition write so a rules rejection can't cost the user's stats. */
+    /** Separate from the votes write so a rules rejection can't cost the user's stats. */
     private fun bumpGlobalPick(key: String, delta: Long) {
         if (currentUidOrNull() == null || _pickLog.value != true) return
         val fs = firestore ?: return
@@ -230,37 +276,29 @@ class SnoozeStatsStore(
         }.onFailure { Log.w(TAG, "global snooze pick log read failed", it) }.getOrNull()
     }
 
-    /** Called only from sign-in. */
+    /** Called only from sign-in: adds the counts learned while signed out to the account's, once. */
     suspend fun pushLocalPartition() = withContext(Dispatchers.Main.immediate) {
         loaded.await()
         val uid = currentUidOrNull() ?: return@withContext
-        ensureOwner(uid)
-        mirror()
+        val deltas = SnoozeStatsWire.voteDeltas(SnoozeStatsSnapshot(), _local.value)
+        _local.value = SnoozeStatsSnapshot()
+        userPreferences.lastCustomTarget = null
+        userPreferences.lastCustomAt = null
+        roomWrites.trySend { dao.clearAll() }
+        addVotes(uid, deltas, emptyMap())
     }
 
-    /** Per user, so it covers every device; turning it off also clears this device's picks. */
+    /** Per user, so it covers every device; turning it off also clears the saved picks. */
     suspend fun setPickLog(enabled: Boolean) = withContext(Dispatchers.Main.immediate) {
         loaded.await()
         val uid = currentUidOrNull() ?: return@withContext
         val fs = firestore ?: return@withContext
-        ensureOwner(uid)
         _pickLog.value = enabled
         val payload = mutableMapOf<String, Any>("snoozePickLog" to enabled)
-        val fields = mutableListOf(FieldPath.of("snoozePickLog"))
-        if (!enabled) {
-            dropPicks()
-            payload["snoozeStats"] = mapOf(deviceId to SnoozeStatsWire.toWire(_local.value))
-            fields += FieldPath.of("snoozeStats", deviceId)
-        }
+        if (!enabled) payload["snoozeVotes"] = mapOf("picks" to FieldValue.delete())
         fs.collection("users").document(uid)
-            .set(payload, SetOptions.mergeFieldPaths(fields))
+            .set(payload, SetOptions.merge())
             .addOnFailureListener { Log.w(TAG, "snoozePickLog write failed", it) }
-    }
-
-    private fun dropPicks() {
-        if (_local.value.picks.isEmpty()) return
-        _local.value = _local.value.copy(picks = emptyMap())
-        roomWrites.trySend { dao.clearPicks() }
     }
 
     suspend fun deleteRemote(uid: String) {
@@ -273,9 +311,7 @@ class SnoozeStatsStore(
         val setUpserts = setIds.mapNotNull { id -> result.next.sets[id]?.let { SnoozeSetEntity(id, it.c, it.t) } }
         val slots = result.undoNearbyTod.keys + listOfNotNull(result.touchedTodSlot)
         val todUpserts = slots.mapNotNull { slot -> result.next.tod[slot]?.let { SnoozeTodEntity(slot, it.c, it.t) } }
-        val pick = result.touchedPickKey
-        val pickUpsert = pick?.let { result.next.picks[it] }?.let { SnoozePickEntity(pick, it) }
-        dao.applyCommitChanges(setUpserts, null, todUpserts, null, pickUpsert, null)
+        dao.applyCommitChanges(setUpserts, null, todUpserts, null, null, null)
     }
 
     private suspend fun persistRevert(result: CommitResult) {
@@ -287,21 +323,25 @@ class SnoozeStatsStore(
         val todUpserts = (result.undoNearbyTod + listOfNotNull(result.undoTodSnapshot?.let { slot?.to(it) }))
             .map { (todSlot, stat) -> SnoozeTodEntity(todSlot, stat.c, stat.t) }
         val todDelete = if (slot != null && result.undoTodSnapshot == null) slot else null
-        val pick = result.touchedPickKey
-        val pickUpsert = if (pick != null) result.undoPickSnapshot?.let { SnoozePickEntity(pick, it) } else null
-        val pickDelete = if (pick != null && result.undoPickSnapshot == null) pick else null
-        dao.applyCommitChanges(setUpserts, setDelete, todUpserts, todDelete, pickUpsert, pickDelete)
+        dao.applyCommitChanges(setUpserts, setDelete, todUpserts, todDelete, null, null)
     }
 
-    private fun mirror() {
-        val uid = currentUidOrNull() ?: return
+    private fun increments(deltas: Map<String, Double>): Map<String, FieldValue> =
+        deltas.mapValues { FieldValue.increment(it.value) }
+
+    private fun lastCustomWire(lastCustom: LastCustom?): Map<String, Long>? =
+        lastCustom?.let { mapOf("target" to it.target, "at" to it.at) }
+
+    /** Amounts are added on the server (and to the cached copy while offline), so nothing another device wrote is overwritten. */
+    private fun addVotes(uid: String, deltas: VoteDeltas, extra: Map<String, Any?>) {
         val fs = firestore ?: return
-        if (_pickLog.value == false) dropPicks()
-        val id = deviceId
-        val payload = mapOf("snoozeStats" to mapOf(id to SnoozeStatsWire.toWire(_local.value)))
+        val votes = extra.toMutableMap()
+        if (deltas.sets.isNotEmpty()) votes["sets"] = increments(deltas.sets)
+        if (deltas.tod.isNotEmpty()) votes["tod"] = increments(deltas.tod)
+        if (votes.isEmpty()) return
         fs.collection("users").document(uid)
-            .set(payload, SetOptions.mergeFieldPaths(listOf(FieldPath.of("snoozeStats", id))))
-            .addOnFailureListener { Log.w(TAG, "snoozeStats mirror failed", it) }
+            .set(mapOf("snoozeVotes" to votes), SetOptions.merge())
+            .addOnFailureListener { Log.w(TAG, "snoozeVotes write failed", it) }
     }
 
     companion object {
