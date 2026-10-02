@@ -11,7 +11,8 @@
     "rank": "rank(partitions, now): each partition is a wire partition; expectKeys are the chosen rows' keys in row (time) order.",
     "wire": "fromWire(raw) must equal normalized, and toWire(fromWire(raw)) must equal normalized. picks keeps only keys 1..20 or none with a positive integer count. A raw partition without v >= 2 was saved before clock keys counted from their first hit: each set's clock keys are resolved the old way (date rule counted from the snooze day of its t) and, if they agree on one target, the set is re-extracted from (t, target) keeping c and t; sets that land on one id merge (both decayed to the later t, summed). toWire always writes v: 2.",
     "rankDeep": "rankDeep(partitions, now): the first 20 distinct rows in greedy selection order (a row's 1-based index is its rank). After each pick every other key's score drops by the pick's score x 2^(-|minutes apart| / 30), floored at 0; the floor still applies to the undiscounted score, and equal discounted scores go to the higher undiscounted one. Keys spent because they land at the same time as a winner take no index. expectShownKeys are the menu's rows: the first 5, in time order.",
-    "pickLog": "pickLogKey(rankDeep(partitions, now), target): the 1-based rank of the deep row whose time is target's minute, however it was picked, or none when no row is."
+    "pickLog": "pickLogKey(rankDeep(partitions, now), target): the 1-based rank of the deep row whose time is target's minute, however it was picked, or none when no row is.",
+    "commit": "commit(partition, at, target, source, pickedKey) -> expect, the partition's whole sets and tod afterwards (c within a relative 1e-9, t exact); undoing it must give back partition exactly. Besides crediting its own set and quick-time slot, a commit multiplies every other set's c by 1 - 2^(-|minutes apart| / 30), taking the largest such share among the set's clock keys, each resolved at `at` and measured from the target's 5-minute slot; t is left alone. A set with a clock key landing exactly on that slot, and a set with no clock keys, keep their c. When a quick-time slot is credited every other slot's c is multiplied by 1 - 2^(-clock minutes apart / 30), the short way round midnight. Sets lose votes on every commit, whatever its source or picked key; quick-time slots only when one is credited."
   },
   "extract": [
     {
@@ -1508,6 +1509,190 @@
       "partitions": [],
       "target": "2026-09-23T09:00:00",
       "expect": "none"
+    }
+  ],
+  "commit": [
+    {
+      "name": "a same-day custom snooze to 19:00 takes votes from sets by distance, and credits no quick time",
+      "at": "2026-09-22T17:00:00",
+      "target": "2026-09-22T19:00:00",
+      "source": "custom",
+      "pickedKey": null,
+      "partition": {
+        "v": 2,
+        "sets": {
+          "D0@1900__D0_h2": { "c": 2, "t": 1790110800000 },
+          "D0@2000": { "c": 8, "t": 1790092800000 },
+          "D0@1930": { "c": 8, "t": 1790092800000 },
+          "D0@1905": { "c": 8, "t": 1790092800000 },
+          "D0@1800": { "c": 8, "t": 1790092800000 },
+          "D1@1900": { "c": 8, "t": 1790092800000 },
+          "D0@1900": { "c": 8, "t": 1790092800000 },
+          "D0@1900__Wd2@2000": { "c": 8, "t": 1790092800000 },
+          "D0_h3": { "c": 8, "t": 1790092800000 },
+          "D0@2000__Wd3@2000": { "c": 8, "t": 1790092800000 },
+          "D1@1830__Wd2@1830": { "c": 8, "t": 1790092800000 }
+        },
+        "tod": {
+          "2000": { "c": 8, "t": 1790092800000 },
+          "1900": { "c": 8, "t": 1790092800000 }
+        },
+        "lastCustom": null
+      },
+      "expect": {
+        "sets": {
+          "D0@1900__D0_h2": { "c": 3, "t": 1790110800000 },
+          "D0@2000": { "c": 6, "t": 1790092800000 },
+          "D0@1930": { "c": 4, "t": 1790092800000 },
+          "D0@1905": { "c": 0.8728102548772858, "t": 1790092800000 },
+          "D0@1800": { "c": 6, "t": 1790092800000 },
+          "D1@1900": { "c": 7.999999999999972, "t": 1790092800000 },
+          "D0@1900": { "c": 8, "t": 1790092800000 },
+          "D0@1900__Wd2@2000": { "c": 8, "t": 1790092800000 },
+          "D0_h3": { "c": 8, "t": 1790092800000 },
+          "D0@2000__Wd3@2000": { "c": 6, "t": 1790092800000 },
+          "D1@1830__Wd2@1830": { "c": 4, "t": 1790092800000 }
+        },
+        "tod": {
+          "2000": { "c": 8, "t": 1790092800000 },
+          "1900": { "c": 8, "t": 1790092800000 }
+        }
+      }
+    },
+    {
+      "name": "a clock-time suggestion pick takes votes too",
+      "at": "2026-09-22T17:00:00",
+      "target": "2026-09-22T19:00:00",
+      "source": "suggestion",
+      "pickedKey": "D0@1900",
+      "partition": {
+        "v": 2,
+        "sets": {
+          "D0@2000": { "c": 8, "t": 1790092800000 }
+        },
+        "tod": {},
+        "lastCustom": null
+      },
+      "expect": {
+        "sets": {
+          "D0@1900__D0_h2": { "c": 1, "t": 1790110800000 },
+          "D0@2000": { "c": 6, "t": 1790092800000 }
+        },
+        "tod": {}
+      }
+    },
+    {
+      "name": "an in-N-hours suggestion pick takes votes like any other",
+      "at": "2026-09-22T17:00:00",
+      "target": "2026-09-22T19:00:00",
+      "source": "suggestion",
+      "pickedKey": "D0_h2",
+      "partition": {
+        "v": 2,
+        "sets": {
+          "D0@2000": { "c": 8, "t": 1790092800000 },
+          "D0@1930": { "c": 8, "t": 1790092800000 }
+        },
+        "tod": {},
+        "lastCustom": null
+      },
+      "expect": {
+        "sets": {
+          "D0@1900__D0_h2": { "c": 1, "t": 1790110800000 },
+          "D0@2000": { "c": 6, "t": 1790092800000 },
+          "D0@1930": { "c": 4, "t": 1790092800000 }
+        },
+        "tod": {}
+      }
+    },
+    {
+      "name": "an in-N-hours pick onto tomorrow takes votes from sets but touches no quick time",
+      "at": "2026-09-22T17:00:00",
+      "target": "2026-09-23T19:00:00",
+      "source": "suggestion",
+      "pickedKey": "D1_h2",
+      "partition": {
+        "v": 2,
+        "sets": {
+          "D1@2000": { "c": 8, "t": 1790092800000 }
+        },
+        "tod": {
+          "2000": { "c": 8, "t": 1790092800000 }
+        },
+        "lastCustom": null
+      },
+      "expect": {
+        "sets": {
+          "D1@1900__D1_h2__Wd3@1900__Wd3_h2": { "c": 1, "t": 1790110800000 },
+          "D1@2000": { "c": 6, "t": 1790092800000 }
+        },
+        "tod": {
+          "2000": { "c": 8, "t": 1790092800000 }
+        }
+      }
+    },
+    {
+      "name": "distance is to where a key resolves: at 21:00 the next 20:00 is tomorrow's, an hour after tomorrow 19:00",
+      "at": "2026-09-22T21:00:00",
+      "target": "2026-09-23T19:00:00",
+      "source": "custom",
+      "pickedKey": null,
+      "partition": {
+        "v": 2,
+        "sets": {
+          "D0@2000": { "c": 8, "t": 1790092800000 },
+          "D1@2000": { "c": 8, "t": 1790092800000 }
+        },
+        "tod": {
+          "1900": { "c": 2, "t": 1790125200000 },
+          "2000": { "c": 8, "t": 1790092800000 },
+          "1930": { "c": 8, "t": 1790092800000 },
+          "1905": { "c": 8, "t": 1790092800000 }
+        },
+        "lastCustom": null
+      },
+      "expect": {
+        "sets": {
+          "D0@1900__Wd3@1900": { "c": 1, "t": 1790125200000 },
+          "D0@2000": { "c": 6, "t": 1790092800000 },
+          "D1@2000": { "c": 7.999999999999993, "t": 1790092800000 }
+        },
+        "tod": {
+          "1900": { "c": 3, "t": 1790125200000 },
+          "2000": { "c": 6, "t": 1790092800000 },
+          "1930": { "c": 4, "t": 1790092800000 },
+          "1905": { "c": 0.8728102548772858, "t": 1790092800000 }
+        }
+      }
+    },
+    {
+      "name": "across midnight: 23:50 and 00:15 are 25 minutes apart, for sets and quick times",
+      "at": "2026-09-22T10:00:00",
+      "target": "2026-09-23T23:50:00",
+      "source": "custom",
+      "pickedKey": null,
+      "partition": {
+        "v": 2,
+        "sets": {
+          "D1@0015": { "c": 8, "t": 1790092800000 }
+        },
+        "tod": {
+          "0015": { "c": 8, "t": 1790092800000 },
+          "1150": { "c": 8, "t": 1790092800000 }
+        },
+        "lastCustom": null
+      },
+      "expect": {
+        "sets": {
+          "D1@2350__Wd3@2350": { "c": 1, "t": 1790085600000 },
+          "D1@0015": { "c": 3.510151806762508, "t": 1790092800000 }
+        },
+        "tod": {
+          "2350": { "c": 1, "t": 1790085600000 },
+          "0015": { "c": 3.510151806762508, "t": 1790092800000 },
+          "1150": { "c": 7.999999523162842, "t": 1790092800000 }
+        }
+      }
     }
   ]
 }

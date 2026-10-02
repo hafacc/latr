@@ -269,26 +269,28 @@ class SnoozeStatsStore(
     }
 
     private suspend fun persist(result: CommitResult) {
-        val id = result.touchedSetId
-        val setUpsert = id?.let { result.next.sets[it] }?.let { SnoozeSetEntity(id, it.c, it.t) }
-        val slot = result.touchedTodSlot
-        val todUpsert = slot?.let { result.next.tod[it] }?.let { SnoozeTodEntity(slot, it.c, it.t) }
+        val setIds = result.undoNearbySets.keys + listOfNotNull(result.touchedSetId)
+        val setUpserts = setIds.mapNotNull { id -> result.next.sets[id]?.let { SnoozeSetEntity(id, it.c, it.t) } }
+        val slots = result.undoNearbyTod.keys + listOfNotNull(result.touchedTodSlot)
+        val todUpserts = slots.mapNotNull { slot -> result.next.tod[slot]?.let { SnoozeTodEntity(slot, it.c, it.t) } }
         val pick = result.touchedPickKey
         val pickUpsert = pick?.let { result.next.picks[it] }?.let { SnoozePickEntity(pick, it) }
-        dao.applyCommitChanges(setUpsert, null, todUpsert, null, pickUpsert, null)
+        dao.applyCommitChanges(setUpserts, null, todUpserts, null, pickUpsert, null)
     }
 
     private suspend fun persistRevert(result: CommitResult) {
         val id = result.touchedSetId
-        val setUpsert = if (id != null) result.undoSetSnapshot?.let { SnoozeSetEntity(id, it.c, it.t) } else null
+        val setUpserts = (result.undoNearbySets + listOfNotNull(result.undoSetSnapshot?.let { id?.to(it) }))
+            .map { (setId, stat) -> SnoozeSetEntity(setId, stat.c, stat.t) }
         val setDelete = if (id != null && result.undoSetSnapshot == null) id else null
         val slot = result.touchedTodSlot
-        val todUpsert = if (slot != null) result.undoTodSnapshot?.let { SnoozeTodEntity(slot, it.c, it.t) } else null
+        val todUpserts = (result.undoNearbyTod + listOfNotNull(result.undoTodSnapshot?.let { slot?.to(it) }))
+            .map { (todSlot, stat) -> SnoozeTodEntity(todSlot, stat.c, stat.t) }
         val todDelete = if (slot != null && result.undoTodSnapshot == null) slot else null
         val pick = result.touchedPickKey
         val pickUpsert = if (pick != null) result.undoPickSnapshot?.let { SnoozePickEntity(pick, it) } else null
         val pickDelete = if (pick != null && result.undoPickSnapshot == null) pick else null
-        dao.applyCommitChanges(setUpsert, setDelete, todUpsert, todDelete, pickUpsert, pickDelete)
+        dao.applyCommitChanges(setUpserts, setDelete, todUpserts, todDelete, pickUpsert, pickDelete)
     }
 
     private fun mirror() {
