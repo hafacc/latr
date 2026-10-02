@@ -3,7 +3,7 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
-const TOD_HALF_LIFE_DAYS = 21;
+export const TOD_HALF_LIFE_DAYS = 21;
 const SLOT_MINUTES = 5;
 const QUICK_TIMES_MAX = 4;
 const SCORE_EPS = 1e-9;
@@ -327,6 +327,10 @@ export function classH(keyId: string): number {
 
 function classHForSet(keys: string[]): number {
   return Math.max(...keys.map(classH));
+}
+
+export function setHalfLifeDays(setId: string): number {
+  return classHForSet(splitSetId(setId));
 }
 
 export function canonicalSetId(keys: string[]): string {

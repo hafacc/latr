@@ -12,8 +12,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { SnoozeUndo } from "./snooze-stats-store";
 import type {
-  CommitUndoSnapshot,
   DevicePartition,
   LastRow,
   QuickTime,
@@ -46,7 +46,7 @@ export type UndoEntry = {
   kind: UndoKind;
   todos: Todo[];
   // Only set for "snooze": the learned-suggestion credit this pick added, so undo can retract it.
-  snoozeUndo?: CommitUndoSnapshot;
+  snoozeUndo?: SnoozeUndo;
 };
 
 export type UiState = {

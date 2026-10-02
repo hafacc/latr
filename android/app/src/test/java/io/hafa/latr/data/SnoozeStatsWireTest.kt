@@ -79,4 +79,57 @@ class SnoozeStatsWireTest {
         assertEquals(2L, counts[20])
         assertEquals(List(21) { 0L }, SnoozeStatsWire.globalPickCounts(null))
     }
+
+    private val zone = java.time.ZoneId.of("America/New_York")
+    private val at = java.time.LocalDateTime.of(2026, 9, 22, 10, 0).atZone(zone).toInstant().toEpochMilli()
+    private val day = 24 * 60 * 60 * 1000L
+
+    private fun block(): SnoozeStatsSnapshot {
+        var stats = SnoozeStatsSnapshot()
+        stats = io.hafa.latr.util.SnoozeSuggestions.commit(stats, at, at + day, zone, "custom").next
+        stats = io.hafa.latr.util.SnoozeSuggestions.commit(stats, at + day, at + 3 * day, zone, "custom").next
+        return io.hafa.latr.util.SnoozeSuggestions.commit(stats, at + 2 * day, at + 40 * day, zone, "custom").next
+    }
+
+    @Test
+    fun `counts saved scaled rank the same as the block they came from`() {
+        val block = block()
+        val deltas = SnoozeStatsWire.voteDeltas(SnoozeStatsSnapshot(), block)
+        val shared = SnoozeStatsWire.sharedFromWire(mapOf("sets" to deltas.sets, "tod" to deltas.tod))
+        val now = at + 30 * day
+        fun rows(stats: SnoozeStatsSnapshot) =
+            io.hafa.latr.util.SnoozeSuggestions.rankDeep(listOf(stats), java.time.Instant.ofEpochMilli(now), zone).map { Triple(it.key, it.epochMillis, "%.9f".format(it.score)) }
+        assertEquals(rows(block), rows(shared))
+        assertEquals(false, rows(block).isEmpty())
+    }
+
+    @Test
+    fun `a vote adds two to the power of half-lives since the epoch`() {
+        val one = io.hafa.latr.util.SnoozeSuggestions.commit(SnoozeStatsSnapshot(), at, at + day, zone, "custom").next
+        val added = SnoozeStatsWire.voteDeltas(SnoozeStatsSnapshot(), one).sets.values.single()
+        assertEquals(Math.pow(2.0, (at - SnoozeStatsWire.VOTE_EPOCH) / (21.0 * day)), added, 1e-6)
+    }
+
+    @Test
+    fun `shared counts at or below zero and malformed ids are dropped`() {
+        val shared = SnoozeStatsWire.sharedFromWire(
+            mapOf(
+                "sets" to mapOf("D0@0900" to 2.0, "D0@1000" to 0.0, "D0@1100" to -1.0, "bogus" to 3.0),
+                "tod" to mapOf("0900" to 1L, "0901" to 1L),
+            ),
+        )
+        assertEquals(setOf("D0@0900"), shared.sets.keys)
+        assertEquals(setOf("0900"), shared.tod.keys)
+    }
+
+    @Test
+    fun `folding sums the blocks not yet folded`() {
+        val wire = SnoozeStatsWire.toWire(block().copy(picks = mapOf("1" to 2L)))
+        val one = SnoozeStatsWire.foldBlocks(mapOf("a" to wire), null, zone)
+        val fold = SnoozeStatsWire.foldBlocks(mapOf("a" to wire, "b" to wire, "c" to wire), mapOf("c" to true), zone)
+        assertEquals(listOf("a", "b"), fold.ids)
+        assertEquals(mapOf("1" to 4L), fold.picks)
+        assertEquals(block().lastCustom, fold.lastCustom)
+        for ((id, amount) in one.deltas.sets) assertEquals(2 * amount, fold.deltas.sets.getValue(id), amount * 1e-9)
+    }
 }

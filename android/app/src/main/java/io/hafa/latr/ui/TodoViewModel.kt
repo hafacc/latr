@@ -4,10 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import io.hafa.latr.data.SnoozeStatsStore
+import io.hafa.latr.data.SnoozeUndo
 import io.hafa.latr.data.Todo
 import io.hafa.latr.data.TodoState
 import io.hafa.latr.data.TodoStoreHolder
-import io.hafa.latr.util.CommitResult
 import io.hafa.latr.util.LocalDateTimeUtil
 import io.hafa.latr.util.SnoozeStatsSnapshot
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,7 +41,7 @@ class TodoViewModel(
     // Most-recent-wins undo: Delete restores via re-insert, Snooze/Complete via update.
     private sealed interface UndoableAction {
         data class Delete(val todos: List<Todo>) : UndoableAction
-        data class Snooze(val previous: Todo, val statsUndo: CommitResult) : UndoableAction
+        data class Snooze(val previous: Todo, val statsUndo: SnoozeUndo) : UndoableAction
         data class Complete(val previous: Todo) : UndoableAction
     }
 
@@ -183,7 +183,7 @@ class TodoViewModel(
     fun signIn(onResult: (Result<Unit>) -> Unit = {}) {
         viewModelScope.launch {
             val result = storeHolder.signIn()
-            // Even if the todo merge failed: a signed-in device must still share its learned history.
+            // Even if the todo merge failed: the counts learned while signed out still join the account's.
             if (snoozeStatsStore.currentUidOrNull() != null) snoozeStatsStore.pushLocalPartition()
             onResult(result)
         }
