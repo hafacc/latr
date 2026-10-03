@@ -4,10 +4,6 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <path
-        android:fillColor="@android:color/system_accent1_800"
-        android:pathData="M57.69,29.94 L65.52,31.6 L61.14,52.2 L72.2,52.2 L72.2,60.2 L51.26,60.2 Z" />
-
     <!-- Clock hands at 3:02 forming bent-L shape -->
     <!-- Minute hand rotated 12° clockwise (2 min = 12°) -->
     <group
