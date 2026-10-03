@@ -2,6 +2,7 @@
 <resources>
 
     <style name="Theme.Latr" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
         <item name="android:windowSplashScreenBackground">@android:color/system_accent2_800</item>
         <item name="android:windowBackground">@android:color/system_background_dark</item>
     </style>
