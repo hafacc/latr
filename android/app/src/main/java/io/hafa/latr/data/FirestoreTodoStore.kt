@@ -105,6 +105,7 @@ class FirestoreTodoStore(
     // set/merge (not update) so a missing doc doesn't abort the batch.
     private fun tombstone(): Map<String, Any> = mapOf(
         "deleted" to true,
+        "text" to "",
         "modifiedAt" to System.currentTimeMillis(),
         "serverModifiedAt" to FieldValue.serverTimestamp(),
     )

@@ -20,7 +20,9 @@ local.properties
 *.hprof
 .kotlin
 
-# Signing keys
+# Signing keys and release credentials
 *.jks
 *.keystore
+keystore.properties
+play-service-account.json
 google-services.json

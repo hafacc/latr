@@ -2,4 +2,8 @@
 <!-- API < 31. The snooze identity must not follow a backup to another device. -->
 <full-backup-content>
     <exclude domain="sharedpref" path="snooze_identity.xml" />
+    <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29" />
+    <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-journal" />
+    <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-wal" />
+    <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-shm" />
 </full-backup-content>

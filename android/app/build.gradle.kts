@@ -1,15 +1,26 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
     alias(libs.plugins.google.services) apply false
+    alias(libs.plugins.play.publisher)
 }
 
 // Only apply google-services plugin when google-services.json is present
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingSetting(name: String): String? =
+    keystoreProperties.getProperty(name) ?: providers.gradleProperty("latr.$name").orNull
 
 android {
     namespace = "io.hafa.latr"
@@ -20,9 +31,24 @@ android {
         minSdk = 34
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // storeFile, storePassword, keyAlias and keyPassword come from android/keystore.properties
+    // (git-ignored), or from -Platr.<name> in CI. Without them release is debug-signed, which
+    // installs locally but Play won't accept.
+    val uploadStoreFile = signingSetting("storeFile")
+    signingConfigs {
+        if (uploadStoreFile != null) {
+            create("upload") {
+                storeFile = rootProject.file(uploadStoreFile)
+                storePassword = signingSetting("storePassword")
+                keyAlias = signingSetting("keyAlias")
+                keyPassword = signingSetting("keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -33,8 +59,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Release is debug-signed for local device testing; needs a real signing config before publishing.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(
+                if (uploadStoreFile != null) "upload" else "debug"
+            )
         }
     }
     compileOptions {
@@ -47,7 +74,7 @@ android {
     sourceSets {
         getByName("test") {
             // Shared with web: web/utils/*.spec.ts read the same fixture.
-            resources.srcDir("../../testdata")
+            resources.directories.add("../../testdata")
         }
     }
 }
@@ -56,6 +83,12 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
+}
+
+// publishReleaseBundle uploads to Play; credentials come from ANDROID_PUBLISHER_CREDENTIALS (.github/workflows/cut-android.yml).
+play {
+    track.set("internal")
+    defaultToAppBundles.set(true)
 }
 
 composeCompiler {
