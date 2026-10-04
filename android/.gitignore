@@ -3,6 +3,8 @@
 .gradle/
 build/
 /app/build/
+# Android Studio's Generate Signed Bundle output
+/app/release/
 
 # Local config
 local.properties

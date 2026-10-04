@@ -1,0 +1,58 @@
+package cc.hafa.latr
+
+import android.annotation.SuppressLint
+import android.app.Application
+import android.util.Log
+import cc.hafa.latr.data.SnoozeStatsStore
+import cc.hafa.latr.data.TodoDatabase
+import cc.hafa.latr.data.TodoStoreHolder
+import cc.hafa.latr.data.UserPreferences
+import cc.hafa.latr.ui.auth.AuthManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+
+class LatrApplication : Application() {
+    private val applicationScope = CoroutineScope(SupervisorJob())
+
+    val database: TodoDatabase by lazy { TodoDatabase.getDatabase(this) }
+    val todoDao by lazy { database.todoDao() }
+    val snoozeStatsDao by lazy { database.snoozeStatsDao() }
+    val userPreferences by lazy { UserPreferences(this) }
+
+    val authManager: AuthManager? by lazy {
+        val clientId = getFirebaseWebClientId()
+        if (clientId == null) {
+            Log.w(TAG, "default_web_client_id not found; auth disabled")
+            return@lazy null
+        }
+        AuthManager(this, applicationScope, clientId)
+    }
+
+    val storeHolder: TodoStoreHolder by lazy {
+        TodoStoreHolder(todoDao, userPreferences, authManager, applicationScope)
+    }
+
+    val snoozeStatsStore: SnoozeStatsStore by lazy {
+        SnoozeStatsStore(snoozeStatsDao, userPreferences, authManager, applicationScope)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Subscribe to auth changes from launch, not only once the UI first reads these.
+        storeHolder
+        snoozeStatsStore
+    }
+
+    // Looked up by name because the resource only exists when google-services.json does.
+    @SuppressLint("DiscouragedApi")
+    private fun getFirebaseWebClientId(): String? = try {
+        val id = resources.getIdentifier("default_web_client_id", "string", packageName)
+        if (id != 0) getString(id) else null
+    } catch (_: Exception) {
+        null
+    }
+
+    companion object {
+        private const val TAG = "LatrApplication"
+    }
+}

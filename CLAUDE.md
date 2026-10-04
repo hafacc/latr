@@ -160,7 +160,7 @@ For sign-in to work on the deployed URL, both `latr.hafa.cc` and `auth.latr.hafa
 
 `.github/workflows/cut-android.yml` (run by hand, choosing patch/minor/major) runs the build checks, bumps `versionName` and `versionCode` in `android/app/build.gradle.kts` on `main`, tags `android-vX.Y.Z`, uploads the signed bundle to Play's **internal testing** track with Gradle Play Publisher (`./gradlew :app:publishReleaseBundle`, the `play {}` block in the app build file), and creates a GitHub release. Promote to production in the Play Console. The GitHub release is made with the workflow's token, so it does not trigger the web deploy.
 
-The app's id on Play and in Firebase is `cc.hafa.latr` (`applicationId`; permanent once uploaded). The code's package and `namespace` stay `io.hafa.latr`, so `google-services.json` must list a client for `cc.hafa.latr` or the build fails with "No matching client found".
+The app's id on Play and in Firebase is `cc.hafa.latr` (`applicationId`; permanent once uploaded), the same as the code's package. `google-services.json` must list a client for it or the build fails with "No matching client found".
 
 One-time setup, in this order (Play only takes uploads from the workflow once the app exists and has one bundle):
 
