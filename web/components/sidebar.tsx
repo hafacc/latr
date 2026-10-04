@@ -44,7 +44,7 @@ export default function Sidebar({
           <span
             className={`font-semibold text-base tracking-tight ${expandedOnly}`}
           >
-            latr
+            Latr
           </span>
         </span>
         <button
