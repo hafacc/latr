@@ -11,6 +11,10 @@ updates:
           - react-dom
           - "@types/react"
           - "@types/react-dom"
+  - package-ecosystem: bun
+    directory: /firebase
+    schedule:
+      interval: monthly
   - package-ecosystem: gradle
     directory: /android
     schedule:

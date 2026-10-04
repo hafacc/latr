@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 class AuthManager(
     private val context: Context,
@@ -36,6 +37,7 @@ class AuthManager(
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
             .setServerClientId(serverClientId)
+            .setNonce(UUID.randomUUID().toString())
             .build()
 
         val request = GetCredentialRequest.Builder()

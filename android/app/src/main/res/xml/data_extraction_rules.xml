@@ -3,8 +3,16 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="snooze_identity.xml" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-journal" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-wal" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-shm" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="snooze_identity.xml" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-journal" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-wal" />
+        <exclude domain="database" path="firestore.%5BDEFAULT%5D.hafaio-latr.%28default%29-shm" />
     </device-transfer>
 </data-extraction-rules>

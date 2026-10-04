@@ -8,10 +8,8 @@ service cloud.firestore {
         allow read, create, delete: if request.auth != null
           && request.auth.uid == userId;
 
-        // Writes must monotonically advance serverModifiedAt. Real edits
-        // stamp serverTimestamp() and always pass; the auto-unsnooze re-sends
-        // its basis, so a stale client loses to a concurrent edit. Legacy
-        // docs without the field get one free pass.
+        // Writes must not move serverModifiedAt back. Every client write stamps
+        // serverTimestamp() and passes; docs without the field get one free pass.
         allow update: if request.auth != null
           && request.auth.uid == userId
           && (!('serverModifiedAt' in resource.data)

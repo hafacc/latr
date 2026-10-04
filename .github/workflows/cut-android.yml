@@ -1,0 +1,116 @@
+# Cut an Android release: bump the version on main, tag it, upload the signed bundle to Play's
+# internal testing track. Promote it from there in the Play Console.
+name: cut android
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    uses: ./.github/workflows/build.yml
+
+  cut:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the bump + tag
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main # the branch tip, not the dispatch SHA
+      - name: Bump
+        id: bump
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          gradle=android/app/build.gradle.kts
+          current=$(sed -nE 's/^ *versionName = "([^"]+)"/\1/p' "$gradle")
+          code=$(sed -nE 's/^ *versionCode = ([0-9]+)/\1/p' "$gradle")
+          IFS=. read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="$major.$((minor + 1)).0" ;;
+            patch) version="$major.$minor.$((${patch:-0} + 1))" ;;
+          esac
+          # Play rejects a versionCode it has already seen, so it only ever goes up
+          sed -i -E \
+            -e "s/^( *versionName = )\"[^\"]+\"/\1\"$version\"/" \
+            -e "s/^( *versionCode = )[0-9]+/\1$((code + 1))/" \
+            "$gradle"
+          echo "tag=android-v$version" >> "$GITHUB_OUTPUT"
+      - name: Tag
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "$TAG"
+          # branch first, tag second (never --follow-tags): a moved main is rejected before the tag exists
+          git push origin HEAD:main
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+
+  publish:
+    needs: cut
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # create the GitHub release
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.cut.outputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+      - name: Restore signing key and Firebase config
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          base64 --decode <<< "$ANDROID_KEYSTORE" > "$RUNNER_TEMP/upload.jks"
+          printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+      - name: Upload to Play
+        env:
+          ANDROID_PUBLISHER_CREDENTIALS: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >-
+          ./gradlew :app:publishReleaseBundle
+          "-Platr.storeFile=$RUNNER_TEMP/upload.jks"
+          "-Platr.storePassword=$STORE_PASSWORD"
+          "-Platr.keyAlias=$KEY_ALIAS"
+          "-Platr.keyPassword=$KEY_PASSWORD"
+      # A release made with this token doesn't fire the web deploy's on:release.
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.cut.outputs.tag }}
+        run: |
+          # notes cover only what changed since the last Android release
+          if previous=$(git describe --tags --abbrev=0 --match "android-v*" "$TAG^" 2>/dev/null); then
+            gh release create "$TAG" --generate-notes --verify-tag --notes-start-tag "$previous"
+          else
+            gh release create "$TAG" --generate-notes --verify-tag
+          fi
