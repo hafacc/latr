@@ -5,12 +5,18 @@ on:
   push:
     branches: [main]
   workflow_call:
+    inputs:
+      product:
+        description: Check only this product (web or android); empty checks both
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   web:
+    if: inputs.product == '' || inputs.product == 'web'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,6 +30,7 @@ jobs:
       - run: bun export
 
   android:
+    if: inputs.product == '' || inputs.product == 'android'
     runs-on: ubuntu-latest
     defaults:
       run:
