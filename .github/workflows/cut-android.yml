@@ -1,5 +1,5 @@
 # Cut an Android release: bump the version on main, tag it, upload the signed bundle to Play's
-# internal testing track. Promote it from there in the Play Console.
+# internal testing track as a draft. Roll it out and promote it from there in the Play Console.
 name: cut android
 
 on:
@@ -13,14 +13,6 @@ on:
           - patch
           - minor
           - major
-      status:
-        description: Play release status (draft until the app is public; a draft is rolled out by hand in the Play Console)
-        required: true
-        type: choice
-        default: draft
-        options:
-          - draft
-          - completed
 
 permissions:
   contents: read
@@ -104,9 +96,8 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          STATUS: ${{ inputs.status }}
         run: >-
-          ./gradlew :app:publishReleaseBundle --release-status "$STATUS"
+          ./gradlew :app:publishReleaseBundle --release-status draft
           "-Platr.storeFile=$RUNNER_TEMP/upload.jks"
           "-Platr.storePassword=$STORE_PASSWORD"
           "-Platr.keyAlias=$KEY_ALIAS"
