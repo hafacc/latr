@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactElement, ReactNode } from "react";
 
-export const metadata: Metadata = { title: "Privacy · latr" };
+export const metadata: Metadata = { title: "Privacy · Latr" };
 
 function Section({
   title,
@@ -22,7 +22,7 @@ export default function Privacy(): ReactElement {
   return (
     <main className="mx-auto max-w-[620px] px-5 py-12 text-[15px] leading-relaxed text-text-secondary">
       <a href="../" className="text-sm text-accent hover:underline">
-        latr
+        Latr
       </a>
       <h1 className="mt-3 mb-0 text-2xl font-semibold text-text">Privacy</h1>
       <Section title="Not signed in">
@@ -31,7 +31,7 @@ export default function Privacy(): ReactElement {
       <Section title="Signed in with Google">
         Your todos and a count of the snooze times you pick are stored in Google
         Firebase under your Google account, so they sync between your devices.
-        Google gives latr your name, email and profile photo, shown in the
+        Google gives Latr your name, email and profile photo, shown in the
         account menu. Other users can't read your data. Signing out removes it
         from the device you sign out on.
       </Section>
@@ -40,12 +40,12 @@ export default function Privacy(): ReactElement {
         of which menu position was picked. It holds no todo text, no times, and
         nothing that identifies you.
       </Section>
-      <Section title="What latr doesn't do">
+      <Section title="What Latr doesn't do">
         No ads, no analytics, no selling or sharing of data. Google handles
         sign-in and storage.
       </Section>
       <Section title="Delete your account">
-        Open latr on the web or on Android, open the account menu, and choose
+        Open Latr on the web or on Android, open the account menu, and choose
         Delete account. Your todos, snooze counts and account are removed right
         away. To have it deleted for you, email support@latr.hafa.cc.
       </Section>
