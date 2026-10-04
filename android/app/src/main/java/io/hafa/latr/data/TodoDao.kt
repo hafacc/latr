@@ -21,9 +21,6 @@ interface TodoDao {
     @Query("SELECT * FROM todos")
     suspend fun getAllSnapshot(): List<Todo>
 
-    @Query("DELETE FROM todos WHERE deleted != 0")
-    suspend fun purgeTombstones()
-
     @Insert
     suspend fun insert(todo: Todo)
 
@@ -36,9 +33,6 @@ interface TodoDao {
 
     @Delete
     suspend fun delete(todo: Todo)
-
-    @Query("DELETE FROM todos WHERE id = :id")
-    suspend fun deleteById(id: String)
 
     @Query("SELECT * FROM todos WHERE text = '' AND deleted = 0 AND id != :exceptId")
     suspend fun getEmptyTodosExcept(exceptId: String): List<Todo>

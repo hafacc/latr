@@ -3,6 +3,7 @@ package io.hafa.latr.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import io.hafa.latr.data.SignOutResult
 import io.hafa.latr.data.SnoozeStatsStore
 import io.hafa.latr.data.SnoozeUndo
 import io.hafa.latr.data.Todo
@@ -10,12 +11,14 @@ import io.hafa.latr.data.TodoState
 import io.hafa.latr.data.TodoStoreHolder
 import io.hafa.latr.util.LocalDateTimeUtil
 import io.hafa.latr.util.SnoozeStatsSnapshot
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.WhileSubscribed
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -30,7 +33,7 @@ class TodoViewModel(
     // null until the first snapshot; lets the UI show a spinner, not a false empty state.
     val todos: StateFlow<List<Todo>?> = storeHolder.store
         .flatMapLatest { it.observeAll() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5.seconds), null)
 
     private val _focusId = MutableStateFlow<String?>(null)
     val focusId: StateFlow<String?> = _focusId
@@ -66,7 +69,7 @@ class TodoViewModel(
         _undoVisible.value = true
         undoExpiryJob?.cancel()
         undoExpiryJob = viewModelScope.launch {
-            delay(UNDO_TIMEOUT_MS)
+            delay(UNDO_TIMEOUT)
             _undoVisible.value = false
             _lastAction = null
         }
@@ -195,16 +198,34 @@ class TodoViewModel(
 
     suspend fun loadGlobalPicks(): List<Long>? = snoozeStatsStore.fetchGlobalPicks()
 
-    fun signOut() {
-        viewModelScope.launch { storeHolder.signOut() }
+    // True while a sign-out is held back by changes that haven't reached the account.
+    private val _signOutPending = MutableStateFlow(false)
+    val signOutPending: StateFlow<Boolean> = _signOutPending
+
+    fun dismissSignOutPending() {
+        _signOutPending.value = false
     }
 
-    fun deleteAccount(onResult: (Result<Unit>) -> Unit = {}) {
+    fun signOut(force: Boolean = false) {
+        _signOutPending.value = false
+        viewModelScope.launch {
+            val result = storeHolder.signOut(force, beforeTerminate = { snoozeStatsStore.detach() })
+            _signOutPending.value = result == SignOutResult.PENDING
+        }
+    }
+
+    /** [keep] leaves the account's todos and learned snooze counts on this device. */
+    fun deleteAccount(keep: Boolean, onResult: (Result<Unit>) -> Unit = {}) {
         viewModelScope.launch {
             val uid = snoozeStatsStore.currentUidOrNull()
+            // Counts add up, so they are only kept once the account is gone; a failed delete must not leave a second copy.
+            val counts = if (keep) snoozeStatsStore.sharedCounts() else null
             val result = storeHolder.deleteAccount(
+                keep = keep,
                 extraRemoteWipe = { if (uid != null) snoozeStatsStore.deleteRemote(uid) },
+                beforeTerminate = { snoozeStatsStore.detach() },
             )
+            if (counts != null && result.isSuccess) snoozeStatsStore.keepCounts(counts)
             onResult(result)
         }
     }
@@ -233,7 +254,7 @@ class TodoViewModel(
     }
 
     companion object {
-        private const val UNDO_TIMEOUT_MS = 5_000L
+        private val UNDO_TIMEOUT = 5.seconds
     }
 }
 

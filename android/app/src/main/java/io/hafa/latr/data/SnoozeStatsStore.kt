@@ -12,6 +12,7 @@ import io.hafa.latr.util.SetStat
 import io.hafa.latr.util.SnoozeStatsSnapshot
 import io.hafa.latr.util.SnoozeSuggestions
 import java.time.ZoneId
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.WhileSubscribed
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -38,18 +40,17 @@ class SnoozeStatsStore(
     private val scope: CoroutineScope,
     private val zoneProvider: () -> ZoneId = { ZoneId.systemDefault() },
 ) {
-    private val firestore: FirebaseFirestore? = try {
-        FirebaseFirestore.getInstance()
-    } catch (_: Exception) {
-        null
-    }
+    private val firestore: FirebaseFirestore?
+        get() = firestoreOrNull()
 
-    fun currentUidOrNull(): String? = authManager?.currentUser?.value?.uid
+    fun currentUidOrNull(): String? = authManager?.uid
 
     private val _local = MutableStateFlow(SnoozeStatsSnapshot())
     private val _shared = MutableStateFlow(SnoozeStatsSnapshot())
     private val _signedIn = MutableStateFlow(false)
     private var remoteListener: ListenerRegistration? = null
+    // Whose counts are attached; [detach] runs ahead of the auth flow, which then sees no change.
+    private var attachedUid: String? = null
     private var folding = false
 
     // `users/{uid}.snoozePickLog`; null while signed out or before the first snapshot.
@@ -59,7 +60,7 @@ class SnoozeStatsStore(
     /** The counts to feed [SnoozeSuggestions.rank]: the account's while signed in, else this device's. */
     val partitions: StateFlow<List<SnoozeStatsSnapshot>> =
         combine(_local, _shared, _signedIn) { local, shared, signedIn -> listOf(if (signedIn) shared else local) }
-            .stateIn(scope, SharingStarted.WhileSubscribed(5000), listOf(SnoozeStatsSnapshot()))
+            .stateIn(scope, SharingStarted.WhileSubscribed(5.seconds), listOf(SnoozeStatsSnapshot()))
 
     private val loaded = CompletableDeferred<Unit>()
 
@@ -80,13 +81,11 @@ class SnoozeStatsStore(
                 }
             }
             if (authManager != null && firestore != null) {
-                var prevUid: String? = null
                 authManager.currentUser.collect { user ->
                     val uid = user?.uid
-                    if (uid != prevUid) {
+                    if (uid != attachedUid) {
                         if (uid != null) attachRemote(uid) else detachRemote()
                     }
-                    prevUid = uid
                 }
             }
         }
@@ -127,6 +126,7 @@ class SnoozeStatsStore(
     private fun attachRemote(uid: String) {
         if (firestore == null) return
         detachRemote()
+        attachedUid = uid
         _signedIn.value = true
         retryAttempt = 0
         startListening(uid)
@@ -188,7 +188,7 @@ class SnoozeStatsStore(
 
     private fun scheduleReattach(uid: String) {
         if (retryJob != null) return
-        val backoff = minOf(MAX_RETRY_DELAY_MS, BASE_RETRY_DELAY_MS shl retryAttempt.coerceAtMost(RETRY_SHIFT_CAP))
+        val backoff = minOf(MAX_RETRY_DELAY, BASE_RETRY_DELAY * (1 shl retryAttempt.coerceAtMost(RETRY_SHIFT_CAP)))
         retryAttempt++
         retryJob = scope.launch(Dispatchers.Main.immediate) {
             delay(backoff)
@@ -197,11 +197,17 @@ class SnoozeStatsStore(
         }
     }
 
+    /** Stops listening to the account's counts; call before the Firestore instance is terminated. */
+    suspend fun detach() = withContext(Dispatchers.Main.immediate) { detachRemote() }
+
     private fun detachRemote() {
         remoteListener?.remove()
         remoteListener = null
         retryJob?.cancel()
         retryJob = null
+        attachedUid = null
+        // A fold cut off by terminate never completes.
+        folding = false
         _signedIn.value = false
         _shared.value = SnoozeStatsSnapshot()
         _pickLog.value = null
@@ -288,6 +294,23 @@ class SnoozeStatsStore(
         addVotes(uid, deltas, emptyMap())
     }
 
+    fun sharedCounts(): SnoozeStatsSnapshot = _shared.value
+
+    /** Makes [counts], a copy of a deleted account's, this device's own. A scaled count at [SnoozeStatsWire.VOTE_EPOCH] is a valid local count, and [pushLocalPartition] adds it back unchanged. */
+    suspend fun keepCounts(counts: SnoozeStatsSnapshot) = withContext(Dispatchers.Main.immediate) {
+        loaded.await()
+        val kept = counts.copy(picks = emptyMap())
+        _local.value = kept
+        userPreferences.lastCustomTarget = kept.lastCustom?.target
+        userPreferences.lastCustomAt = kept.lastCustom?.at
+        roomWrites.trySend {
+            dao.replaceCounts(
+                kept.sets.map { (id, stat) -> SnoozeSetEntity(id, stat.c, stat.t) },
+                kept.tod.map { (slot, stat) -> SnoozeTodEntity(slot, stat.c, stat.t) },
+            )
+        }
+    }
+
     /** Per user, so it covers every device; turning it off also clears the saved picks. */
     suspend fun setPickLog(enabled: Boolean) = withContext(Dispatchers.Main.immediate) {
         loaded.await()
@@ -346,8 +369,8 @@ class SnoozeStatsStore(
 
     companion object {
         private const val TAG = "SnoozeStatsStore"
-        private const val BASE_RETRY_DELAY_MS = 1_000L
-        private const val MAX_RETRY_DELAY_MS = 30_000L
+        private val BASE_RETRY_DELAY = 1.seconds
+        private val MAX_RETRY_DELAY = 30.seconds
         private const val RETRY_SHIFT_CAP = 5
     }
 }

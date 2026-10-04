@@ -129,6 +129,16 @@ export class LocalTodoStore extends BaseTodoStore {
     this.commit(todos);
   }
 
+  /** Empties the store and its saved copy at once, so a later [hydrate] can't bring rows back. */
+  clear(): void {
+    this.replaceAll([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // best-effort
+    }
+  }
+
   async insert(todo: Todo): Promise<void> {
     this.commit([todo, ...this.todos]);
   }
@@ -199,6 +209,15 @@ export class LocalTodoStore extends BaseTodoStore {
 
   private persisted(): string {
     return JSON.stringify([...this.todos, ...this.tombstones]);
+  }
+
+  /** Saves now what [schedulePersist] would save shortly. */
+  flush(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+      localStorage.setItem(STORAGE_KEY, this.persisted());
+    }
   }
 
   private schedulePersist(): void {

@@ -14,6 +14,19 @@ export const metadata: Metadata = {
   description: "Do it latr.",
 };
 
+// A meta tag because GitHub Pages can't send headers. 'unsafe-inline' scripts: the static export emits inline ones.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://apis.google.com",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https://*.googleusercontent.com",
+  "connect-src 'self' https://*.googleapis.com https://auth.latr.hafa.cc",
+  "frame-src https://auth.latr.hafa.cc",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 export const viewport: Viewport = {
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
@@ -30,6 +43,14 @@ export default function RootLayout({
 }): ReactElement {
   return (
     <html lang="en" className={geist.variable}>
+      {process.env.NODE_ENV === "production" && (
+        <head>
+          <meta
+            httpEquiv="Content-Security-Policy"
+            content={CONTENT_SECURITY_POLICY}
+          />
+        </head>
+      )}
       <body>
         <ThemeProvider>
           <TodoProvider>

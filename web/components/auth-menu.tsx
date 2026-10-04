@@ -18,6 +18,7 @@ import {
   LuLogOut,
   LuMonitor,
   LuMoon,
+  LuShield,
   LuSun,
   LuTrash2,
   LuUser,
@@ -32,8 +33,8 @@ import { type ThemeMode, useTheme } from "./theme";
 type AuthValue = {
   user: User | null;
   signIn: () => Promise<void>;
-  signOut: () => Promise<void>;
-  deleteAccount: () => Promise<void>;
+  signOut: (force: boolean) => Promise<"done" | "pending">;
+  deleteAccount: (keep: boolean) => Promise<void>;
 };
 
 const AuthCtx = createContext<AuthValue | null>(null);
@@ -93,16 +94,17 @@ export function AuthProvider({
           );
         }
       },
-      async signOut() {
+      async signOut(force) {
         try {
-          await holder.signOut();
+          return await holder.signOut(force);
         } catch (e) {
           console.error(e);
+          return "done";
         }
       },
-      async deleteAccount() {
+      async deleteAccount(keep) {
         try {
-          await holder.deleteAccount();
+          await holder.deleteAccount(keep);
         } catch (e) {
           console.error(e);
           alert(
@@ -203,12 +205,23 @@ function GoogleMark(): ReactElement {
   );
 }
 
-function ConfirmDelete({
-  onConfirm,
+const dialogButton =
+  "h-8 px-3 rounded-lg text-sm text-text hover:bg-surface-hover transition-colors";
+const dialogDangerButton =
+  "h-8 px-3 rounded-lg text-sm font-medium bg-danger text-on-danger hover:opacity-90 transition-opacity";
+
+function ConfirmDialog({
+  id,
+  title,
+  body,
   onCancel,
+  children,
 }: {
-  onConfirm: () => void;
+  id: string;
+  title: string;
+  body: string;
   onCancel: () => void;
+  children: ReactNode;
 }): ReactElement {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -219,38 +232,79 @@ function ConfirmDelete({
   return (
     <dialog
       ref={ref}
-      aria-labelledby="delete-account-title"
+      aria-labelledby={id}
       onCancel={(e) => {
         e.preventDefault();
         onCancel();
       }}
       onKeyDown={(e) => e.stopPropagation()}
-      className="m-auto p-5 w-[min(360px,calc(100vw-32px))] rounded-[14px] bg-surface-raised text-text shadow-pop animate-rise"
+      className="m-auto p-5 w-[min(400px,calc(100vw-32px))] rounded-[14px] bg-surface-raised text-text shadow-pop animate-rise"
     >
-      <h2 id="delete-account-title" className="m-0 text-base font-semibold">
-        Delete your account?
+      <h2 id={id} className="m-0 text-base font-semibold">
+        {title}
       </h2>
-      <p className="mt-2 mb-5 text-sm text-text-secondary">
-        This removes all remote todos and your auth record. Todos on this device
-        are kept.
-      </p>
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="h-8 px-3 rounded-lg text-sm text-text hover:bg-surface-hover transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={onConfirm}
-          className="h-8 px-3 rounded-lg text-sm font-medium bg-danger text-on-danger hover:opacity-90 transition-opacity"
-        >
-          Delete account
-        </button>
-      </div>
+      <p className="mt-2 mb-5 text-sm text-text-secondary">{body}</p>
+      <div className="flex flex-wrap justify-end gap-2">{children}</div>
     </dialog>
+  );
+}
+
+function ConfirmDelete({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: (keep: boolean) => void;
+  onCancel: () => void;
+}): ReactElement {
+  return (
+    <ConfirmDialog
+      id="delete-account-title"
+      title="Delete your account?"
+      body="This deletes your account and everything synced to it."
+      onCancel={onCancel}
+    >
+      <button type="button" onClick={onCancel} className={dialogButton}>
+        Cancel
+      </button>
+      <button
+        type="button"
+        onClick={() => onConfirm(true)}
+        className={dialogButton}
+      >
+        Keep todos on this device
+      </button>
+      <button
+        type="button"
+        onClick={() => onConfirm(false)}
+        className={dialogDangerButton}
+      >
+        Delete everything
+      </button>
+    </ConfirmDialog>
+  );
+}
+
+function ConfirmSignOut({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}): ReactElement {
+  return (
+    <ConfirmDialog
+      id="sign-out-title"
+      title="Changes haven't synced"
+      body="Some changes on this device haven't reached your account yet. Signing out now drops them."
+      onCancel={onCancel}
+    >
+      <button type="button" onClick={onCancel} className={dialogButton}>
+        Wait
+      </button>
+      <button type="button" onClick={onConfirm} className={dialogDangerButton}>
+        Sign out now
+      </button>
+    </ConfirmDialog>
   );
 }
 
@@ -344,6 +398,7 @@ function StatsRow({ user }: { user: User }): ReactElement | null {
 function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
   const { user, signIn, signOut, deleteAccount } = useAuth();
   const [confirming, setConfirming] = useState(false);
+  const [unsynced, setUnsynced] = useState(false);
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -369,6 +424,13 @@ function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
       )}
       <ThemeSegmented />
       <InstallRow />
+      <a
+        href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/privacy/`}
+        className="flex items-center gap-2.5 h-10 px-2 rounded-[10px] text-sm text-text hover:bg-surface-hover transition-colors"
+      >
+        <LuShield className="w-4 h-4 text-text-secondary" />
+        Privacy
+      </a>
       {user && <PickLogRow />}
       {user && <StatsRow user={user} />}
       {user ? (
@@ -376,8 +438,8 @@ function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
           <button
             type="button"
             onClick={async () => {
-              await signOut();
-              onDone();
+              if ((await signOut(false)) === "pending") setUnsynced(true);
+              else onDone();
             }}
             className="flex items-center gap-2.5 h-10 px-2 rounded-[10px] text-sm text-text hover:bg-surface-hover transition-colors"
           >
@@ -409,9 +471,19 @@ function AccountPanel({ onDone }: { onDone: () => void }): ReactElement {
       {confirming && (
         <ConfirmDelete
           onCancel={() => setConfirming(false)}
-          onConfirm={async () => {
+          onConfirm={async (keep) => {
             setConfirming(false);
-            await deleteAccount();
+            await deleteAccount(keep);
+            onDone();
+          }}
+        />
+      )}
+      {unsynced && (
+        <ConfirmSignOut
+          onCancel={() => setUnsynced(false)}
+          onConfirm={async () => {
+            setUnsynced(false);
+            await signOut(true);
             onDone();
           }}
         />

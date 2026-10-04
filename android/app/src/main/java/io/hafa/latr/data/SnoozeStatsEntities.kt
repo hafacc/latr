@@ -92,6 +92,13 @@ interface SnoozeStatsDao {
     }
 
     @Transaction
+    suspend fun replaceCounts(sets: List<SnoozeSetEntity>, tod: List<SnoozeTodEntity>) {
+        clearAll()
+        for (set in sets) upsertSet(set)
+        for (slot in tod) upsertTod(slot)
+    }
+
+    @Transaction
     suspend fun clearAll() {
         clearSets()
         clearTod()

@@ -22,6 +22,17 @@ class SnoozeStatsWireTest {
     }
 
     @Test
+    fun `shared counts kept as a device's own are added back to an account unchanged`() {
+        val votes = mapOf(
+            "sets" to mapOf("D0@0900" to 5000.25, "Dom1@0900" to 3.5),
+            "tod" to mapOf("0900" to 12.75),
+        )
+        val kept = SnoozeStatsWire.sharedFromWire(votes)
+        val pushed = SnoozeStatsWire.voteDeltas(SnoozeStatsSnapshot(), kept)
+        assertEquals(VoteDeltas(sets = mapOf("D0@0900" to 5000.25, "Dom1@0900" to 3.5), tod = mapOf("0900" to 12.75)), pushed)
+    }
+
+    @Test
     fun `the wire form has exactly v, sets, tod, lastCustom and picks`() {
         val wire = SnoozeStatsWire.toWire(SnoozeStatsSnapshot())
         assertEquals(setOf("v", "sets", "tod", "lastCustom", "picks"), wire.keys)

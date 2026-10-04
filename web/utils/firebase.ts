@@ -3,10 +3,12 @@
 import { type FirebaseApp, getApps, initializeApp } from "firebase/app";
 import { type Auth, getAuth } from "firebase/auth";
 import {
+  clearIndexedDbPersistence,
   type Firestore,
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
+  terminate,
 } from "firebase/firestore";
 
 // Public Firebase web config; access is enforced by Firestore rules. Replace when forking.
@@ -47,6 +49,15 @@ export function db(): Firestore {
     cachedDb = getFirestore(app());
   }
   return cachedDb;
+}
+
+/** Ends the Firestore instance and wipes its on-device cache, unsent writes included; the next [db] call starts a fresh one. */
+export async function clearDbCache(): Promise<void> {
+  const ended = cachedDb;
+  if (!ended) return;
+  cachedDb = null;
+  await terminate(ended);
+  await clearIndexedDbPersistence(ended);
 }
 
 export function firebaseConfigured(): boolean {

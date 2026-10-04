@@ -1,5 +1,6 @@
 package io.hafa.latr
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.util.Log
 import io.hafa.latr.data.SnoozeStatsStore
@@ -28,7 +29,7 @@ class LatrApplication : Application() {
     }
 
     val storeHolder: TodoStoreHolder by lazy {
-        TodoStoreHolder(todoDao, authManager, applicationScope)
+        TodoStoreHolder(todoDao, userPreferences, authManager, applicationScope)
     }
 
     val snoozeStatsStore: SnoozeStatsStore by lazy {
@@ -42,6 +43,8 @@ class LatrApplication : Application() {
         snoozeStatsStore
     }
 
+    // Looked up by name because the resource only exists when google-services.json does.
+    @SuppressLint("DiscouragedApi")
     private fun getFirebaseWebClientId(): String? = try {
         val id = resources.getIdentifier("default_web_client_id", "string", packageName)
         if (id != 0) getString(id) else null

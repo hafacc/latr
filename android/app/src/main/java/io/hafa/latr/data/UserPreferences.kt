@@ -63,6 +63,13 @@ class UserPreferences(context: Context) {
             }
         }
 
+    /** Set once the Room todos an older build left behind while signed in have been cleared. */
+    var localTodosMoved: Boolean
+        get() = prefs.getBoolean(KEY_LOCAL_TODOS_MOVED, false)
+        set(value) {
+            prefs.edit { putBoolean(KEY_LOCAL_TODOS_MOVED, value) }
+        }
+
     /** The [SnoozeStatsWire.PARTITION_VERSION] this device's Room sets are in; 0 for sets saved before versions existed. */
     var snoozeSetsVersion: Int
         get() = snoozeIdentity.getInt(KEY_SETS_VERSION, 0)
@@ -86,6 +93,7 @@ class UserPreferences(context: Context) {
         const val KEY_LAST_CUSTOM_TARGET = "last_custom_target"
         const val KEY_LAST_CUSTOM_AT = "last_custom_at"
         const val KEY_SETS_VERSION = "snooze_sets_version"
+        const val KEY_LOCAL_TODOS_MOVED = "local_todos_moved"
         val IDENTITY_KEYS = listOf(KEY_DEVICE_ID, KEY_OWNER_UID, KEY_LAST_CUSTOM_TARGET, KEY_LAST_CUSTOM_AT)
     }
 }

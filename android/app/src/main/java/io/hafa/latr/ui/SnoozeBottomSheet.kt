@@ -77,6 +77,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.delay
 
 private enum class SheetStep { MENU, DATE, TIME }
@@ -88,7 +89,7 @@ private sealed class MenuRow {
     data object Custom : MenuRow()
 }
 
-private const val MENU_CLOCK_TICK_MS = 30_000L
+private val MENU_CLOCK_TICK = 30.seconds
 
 private fun buildMenuRows(
     partitions: List<SnoozeStatsSnapshot>,
@@ -119,7 +120,7 @@ fun SnoozeBottomSheet(
     var now by remember { mutableStateOf(initialNow ?: Instant.now()) }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(MENU_CLOCK_TICK_MS)
+            delay(MENU_CLOCK_TICK)
             now = Instant.now()
         }
     }
@@ -258,7 +259,6 @@ private fun MenuStep(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateStep(
     datePickerState: DatePickerState,

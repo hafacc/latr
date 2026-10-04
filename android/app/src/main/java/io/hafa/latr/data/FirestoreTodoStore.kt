@@ -6,6 +6,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -48,11 +49,11 @@ class FirestoreTodoStore(
             awaitClose { reg.remove() }
         }.onEach { failures = 0 }.retryWhen { cause, _ ->
             val backoff = minOf(
-                MAX_RETRY_DELAY_MS,
-                BASE_RETRY_DELAY_MS shl failures.coerceAtMost(RETRY_SHIFT_CAP),
+                MAX_RETRY_DELAY,
+                BASE_RETRY_DELAY * (1 shl failures.coerceAtMost(RETRY_SHIFT_CAP)),
             )
             failures++
-            Log.w(TAG, "snapshot listener error; retrying in ${backoff}ms", cause)
+            Log.w(TAG, "snapshot listener error; retrying in $backoff", cause)
             delay(backoff)
             true
         }
@@ -135,8 +136,8 @@ class FirestoreTodoStore(
 
     companion object {
         private const val TAG = "FirestoreTodoStore"
-        private const val BASE_RETRY_DELAY_MS = 1_000L
-        private const val MAX_RETRY_DELAY_MS = 30_000L
+        private val BASE_RETRY_DELAY = 1.seconds
+        private val MAX_RETRY_DELAY = 30.seconds
         private const val RETRY_SHIFT_CAP = 5
     }
 }

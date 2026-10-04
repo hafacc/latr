@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.AuthCredential
@@ -33,6 +34,10 @@ class AuthManager(
         awaitClose { auth.removeAuthStateListener(listener) }
     }.stateIn(scope, SharingStarted.Eagerly, auth.currentUser)
 
+    // Straight from auth: [currentUser] lags a sign-out.
+    val uid: String?
+        get() = auth.currentUser?.uid
+
     private suspend fun getGoogleCredential(): AuthCredential {
         val googleIdOption = GetGoogleIdOption.Builder()
             .setFilterByAuthorizedAccounts(false)
@@ -44,7 +49,12 @@ class AuthManager(
             .addCredentialOption(googleIdOption)
             .build()
 
-        val result = credentialManager.getCredential(context, request)
+        val result = try {
+            credentialManager.getCredential(context, request)
+        } catch (e: NoCredentialException) {
+            Log.w(TAG, "no Google account available to sign in with", e)
+            throw e
+        }
         val googleIdToken = GoogleIdTokenCredential.createFrom(result.credential.data)
         return GoogleAuthProvider.getCredential(googleIdToken.idToken, null)
     }

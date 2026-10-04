@@ -72,8 +72,8 @@ import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -160,6 +160,7 @@ import io.hafa.latr.ui.auth.rememberAuthState
 import io.hafa.latr.ui.theme.LatrTheme
 import io.hafa.latr.util.LocalDateTimeUtil
 import kotlin.math.abs
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -492,12 +493,11 @@ private fun GroupHeader(label: String, count: Int, modifier: Modifier = Modifier
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodoScreen(
     viewModel: TodoViewModel,
+    modifier: Modifier = Modifier,
     authManager: AuthManager? = null,
-    modifier: Modifier = Modifier
 ) {
     val todos by viewModel.todos.collectAsState()
     val focusId by viewModel.focusId.collectAsState()
@@ -507,6 +507,7 @@ fun TodoScreen(
 
     val undoVisible by viewModel.undoVisible.collectAsState()
     val undoLabel by viewModel.undoLabel.collectAsState()
+    val signOutPending by viewModel.signOutPending.collectAsState()
 
     var showSnoozeSheet by remember { mutableStateOf(false) }
     var todoToSnooze by remember { mutableStateOf<Todo?>(null) }
@@ -590,8 +591,8 @@ fun TodoScreen(
                 isAdmin = isAdmin,
                 loadPickCounts = { viewModel.loadGlobalPicks() },
                 onSignOut = { viewModel.signOut() },
-                onDeleteAccount = {
-                    viewModel.deleteAccount { result ->
+                onDeleteAccount = { keep ->
+                    viewModel.deleteAccount(keep) { result ->
                         if (result.isFailure) {
                             Toast.makeText(
                                 context,
@@ -606,13 +607,37 @@ fun TodoScreen(
             )
         }
     }
+
+    if (signOutPending) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissSignOutPending() },
+            title = { Text("Changes haven't synced") },
+            text = {
+                Text(
+                    "Some changes on this device haven't reached your account yet. " +
+                        "Signing out now drops them."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.signOut(force = true) }) {
+                    Text("Sign out now")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissSignOutPending() }) {
+                    Text("Wait")
+                }
+            }
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun TodoScreenContent(
     // null = pre-first-snapshot (show spinner); a non-null empty list is a genuine empty state.
     todos: List<Todo>?,
+    modifier: Modifier = Modifier,
     focusId: String? = null,
     fastCreationId: String? = null,
     onCreateTodo: () -> Unit,
@@ -635,8 +660,7 @@ fun TodoScreenContent(
     profilePhotoUrl: String? = null,
     onSignInClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
-    modifier: Modifier = Modifier,
-    initialStatusFilter: StatusFilter = StatusFilter.ACTIVE
+    initialStatusFilter: StatusFilter = StatusFilter.ACTIVE,
 ) {
     var isRefreshing by remember { mutableStateOf(false) }
     // Nothing writes to a todo when its snooze lapses, so this has to advance itself.
@@ -677,7 +701,7 @@ fun TodoScreenContent(
             .mapNotNull { it.snoozeUntil?.let(LocalDateTimeUtil::toEpochMillis) }
             .filter { it > nowMillis }
             .minOrNull() ?: return@LaunchedEffect
-        delay((nextExpiry - System.currentTimeMillis()).coerceAtLeast(100L))
+        delay((nextExpiry - System.currentTimeMillis()).coerceAtLeast(100L).milliseconds)
         nowMillis = System.currentTimeMillis()
     }
 
@@ -877,7 +901,7 @@ fun TodoScreenContent(
                         scope.launch {
                             isRefreshing = true
                             nowMillis = System.currentTimeMillis()
-                            delay(500)
+                            delay(500.milliseconds)
                             isRefreshing = false
                         }
                     },
@@ -996,11 +1020,11 @@ private data class SwipeLook(
     val label: String,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TodoItem(
     todo: Todo,
     shouldRequestFocus: Boolean,
+    modifier: Modifier = Modifier,
     // Derived by the caller from its ticking clock.
     snoozed: Boolean = false,
     isInFastComposeMode: Boolean = false,
@@ -1014,7 +1038,6 @@ fun TodoItem(
     // Null disables pinning (passed for every row but a done one).
     onTogglePin: (() -> Unit)? = null,
     onCreateNewTodo: () -> Unit,
-    modifier: Modifier = Modifier
 ) {
     // At rest the row is a plain Text; tapping swaps in the editor (`editing` gates it).
     var editing by remember(todo.id) { mutableStateOf(false) }
