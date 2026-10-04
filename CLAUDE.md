@@ -158,7 +158,7 @@ For sign-in to work on the deployed URL, both `latr.hafa.cc` and `auth.latr.hafa
 
 ### Android release
 
-`.github/workflows/cut-android.yml` (run by hand, choosing patch/minor/major) runs the build checks, bumps `versionName` and `versionCode` in `android/app/build.gradle.kts` on `main`, tags `android-vX.Y.Z`, uploads the signed bundle to Play's **internal testing** track with Gradle Play Publisher (`./gradlew :app:publishReleaseBundle`, the `play {}` block in the app build file), and creates a GitHub release. Promote to production in the Play Console. The upload is always a draft: it lands on the track and is rolled out by hand in the Play Console, after trying the build. (Play's API also refuses anything but a draft while the app has never been public.) The GitHub release is made with the workflow's token, so it does not trigger the web deploy.
+`.github/workflows/cut-android.yml` (run by hand, choosing patch/minor/major) runs the Android build checks, bumps `versionName` and `versionCode` in `android/app/build.gradle.kts` on `main`, tags `android-vX.Y.Z`, and starts `.github/workflows/publish-android.yml` on that tag. Publish uploads the signed bundle to Play's **internal testing** track with Gradle Play Publisher (`./gradlew :app:publishReleaseBundle`, the `play {}` block in the app build file) and creates a GitHub release; run it by hand with a tag to retry a failed upload without cutting a new version. Promote to production in the Play Console. The upload is always a draft: it lands on the track and is rolled out by hand in the Play Console, after trying the build. (Play's API also refuses anything but a draft while the app has never been public.) The GitHub release is made with the workflow's token, so it does not trigger the web deploy.
 
 The app's id on Play and in Firebase is `cc.hafa.latr` (`applicationId`; permanent once uploaded), the same as the code's package. `google-services.json` must list a client for it or the build fails with "No matching client found".
 
@@ -177,7 +177,7 @@ keyPassword=…
 3. `cd android && ./gradlew bundleRelease`, then create the app in the Play Console and upload `app/build/outputs/bundle/release/app-release.aab` to internal testing by hand. This first upload uses `versionCode` 1; the workflow bumps it from there.
 4. Copy the SHA-1 and SHA-256 from Play Console → Setup → App signing into the Firebase project's Android app, or Google sign-in fails in the Play build.
 5. In Google Cloud (project `hafaio-latr`) enable the Google Play Android Developer API, create a service account and download a JSON key for it to `android/play-service-account.json` (git-ignored). In Play Console → Users and permissions, invite the service account's email with permission to release to testing tracks for this app.
-6. Copy the same key, passwords and files into a GitHub environment named `release` (the workflow's `publish` job reads them from there), from the repo root:
+6. Copy the same key, passwords and files into a GitHub environment named `release` (`publish-android.yml` reads them from there), from the repo root:
 
 ```sh
 gh api -X PUT repos/hafacc/latr/environments/release
