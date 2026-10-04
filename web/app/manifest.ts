@@ -6,8 +6,8 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "latr",
-    short_name: "latr",
+    name: "Latr",
+    short_name: "Latr",
     description: "Do it latr.",
     id: `${basePath}/`,
     start_url: `${basePath}/`,
