@@ -14,9 +14,10 @@ import {
   doc,
   getDocs,
   serverTimestamp,
+  waitForPendingWrites,
   writeBatch,
 } from "firebase/firestore";
-import { auth, db, firebaseConfigured } from "./firebase";
+import { auth, clearDbCache, db, firebaseConfigured } from "./firebase";
 import { planMerge } from "./merge";
 import { SnoozeStatsStore } from "./snooze-stats-store";
 import { fromFirestore, type Todo, toFirestoreFields } from "./todo";
@@ -26,7 +27,11 @@ import {
   type TodoStore,
 } from "./todo-store";
 
-/** Owns the live [TodoStore]; swaps it at the auth boundary. Merge/snapshot happen only on [signIn]/[signOut]/[deleteAccount]. */
+// Set once this build has dropped the copy older builds left on the device while signed in.
+const MOVED_KEY = "latr:local-moved:v1";
+const SIGN_OUT_WAIT_MS = 3_000;
+
+/** Owns the live [TodoStore]; swaps it at the auth boundary. Todos move into the account on [signIn] and leave the device on [signOut]; [deleteAccount] can move them back. */
 export class TodoStoreHolder {
   private localStore = new LocalTodoStore();
   private firestoreStore: FirestoreTodoStore | null = null;
@@ -48,8 +53,10 @@ export class TodoStoreHolder {
       this.unsubAuth = onAuthStateChanged(auth(), (u) => {
         const prevUid = this.user?.uid ?? null;
         this.user = u;
+        this.dropStaleLocalCopy(u !== null);
         if (u && u.uid !== prevUid) this.swapToFirestore(u.uid);
-        else if (!u && prevUid !== null) this.swapToLocal();
+        // Also how a sign-out made in another tab reaches this one.
+        else if (!u && prevUid !== null) void this.leaveAccount();
       });
     }
   }
@@ -107,22 +114,40 @@ export class TodoStoreHolder {
     }
   }
 
-  /** Sign out; copies todos into the local store first to preserve them. */
-  async signOut(): Promise<void> {
-    await this.snapshotFirestoreIntoLocal();
-    await auth().signOut();
+  /**
+   * Sign out and wipe the account's data from this device. Returns "pending",
+   * changing nothing, when edits haven't reached the account within a short
+   * wait; [force] signs out anyway and drops them.
+   */
+  async signOut(force = false): Promise<"done" | "pending"> {
+    if (this.firestoreStore && !force && !(await this.writesSent())) {
+      return "pending";
+    } else {
+      await auth().signOut();
+      await this.leaveAccount();
+      return "done";
+    }
   }
 
-  /** Copy state locally, wipe remote, then delete the auth user (triggers sign-out). */
-  async deleteAccount(): Promise<void> {
+  /** Wipe remote, then delete the auth user. [keep] first moves the todos and snooze counts back onto this device. */
+  async deleteAccount(keep: boolean): Promise<void> {
     const user = this.user;
     if (!user) return;
-    // Reauth before wiping: a delete() that fails post-wipe could snapshot the empty remote over local.
+    // Reauth before wiping, so a rejected delete() can't leave a live account with no data.
     await reauthenticateWithPopup(user, new GoogleAuthProvider());
-    await this.snapshotFirestoreIntoLocal();
+    // Todos are matched by id, so an early copy is harmless if the delete fails; counts add up, so they are only kept once it succeeds.
+    const counts = keep ? this.snoozeStats.getShared() : null;
+    if (keep) {
+      const remote = await this.firestoreStore?.snapshot();
+      if (remote) this.localStore.replaceAll(remote);
+    } else {
+      this.localStore.clear();
+    }
     if (this.firestoreStore) await this.firestoreStore.deleteAll();
     await deleteDoc(doc(db(), "users", user.uid));
     await user.delete();
+    if (counts) this.snoozeStats.keepLocally(counts);
+    await this.leaveAccount();
   }
 
   /** Reattach the Firestore snapshot listener (after tab wake / online). */
@@ -179,14 +204,45 @@ export class TodoStoreHolder {
     this.setStore(this.localStore);
   }
 
-  private async snapshotFirestoreIntoLocal(): Promise<void> {
-    const fs = this.firestoreStore;
-    if (!fs) return;
+  private async writesSent(): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), SIGN_OUT_WAIT_MS);
+    });
     try {
-      const remote = await fs.snapshot();
-      this.localStore.replaceAll(remote);
+      return await Promise.race([
+        waitForPendingWrites(db()).then(() => true),
+        timedOut,
+      ]);
     } catch (e) {
-      console.error("snapshot-to-local failed", e);
+      console.error("waiting for unsent writes failed", e);
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Listeners must be gone before the Firestore instance they hang off is ended.
+  private async leaveAccount(): Promise<void> {
+    this.user = null;
+    // Another tab may have changed the saved todos since this one read them.
+    this.localStore.flush();
+    this.localStore.hydrate();
+    this.swapToLocal();
+    try {
+      await clearDbCache();
+    } catch (e) {
+      console.error("clearing the firestore cache failed", e);
+    }
+  }
+
+  private dropStaleLocalCopy(signedIn: boolean): void {
+    try {
+      if (localStorage.getItem(MOVED_KEY) !== null) return;
+      if (signedIn) this.localStore.clear();
+      localStorage.setItem(MOVED_KEY, "1");
+    } catch {
+      // best-effort
     }
   }
 
@@ -203,7 +259,7 @@ export class TodoStoreHolder {
         fromFirestore(d.id, d.data() as Record<string, unknown>),
       );
     }
-    const { toPush, toDropLocalIds } = planMerge(local, remoteById);
+    const { toPush } = planMerge(local, remoteById);
     if (toPush.length > 0) {
       const batch = writeBatch(db());
       for (const t of toPush) {
@@ -215,9 +271,6 @@ export class TodoStoreHolder {
       }
       await batch.commit();
     }
-    const dropSet = new Set(toDropLocalIds);
-    this.localStore.replaceAll(
-      this.localStore.getTodos().filter((t) => !dropSet.has(t.id)),
-    );
+    this.localStore.clear();
   }
 }

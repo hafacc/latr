@@ -14,6 +14,7 @@ class InlineStyleFixturesTest {
         for (case in cases) {
             val name = case["name"] as String
             val input = case["in"] as String
+            @Suppress("UNCHECKED_CAST")
             val expected = (case["spans"] as List<List<Any?>>).map { (style, start, end) ->
                 listOf(style, (start as Number).toInt(), (end as Number).toInt())
             }

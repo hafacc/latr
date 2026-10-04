@@ -189,6 +189,15 @@ export class SnoozeStatsStore {
     await this.writeVotes(uid, deltas, {});
   }
 
+  getShared(): DevicePartition {
+    return this.shared;
+  }
+
+  /** Makes [counts], a copy of a deleted account's, this device's own. */
+  keepLocally(counts: DevicePartition): void {
+    this.setLocal({ ...counts, deviceId: "local" });
+  }
+
   attachRemote(uid: string): void {
     if (this.uid === uid && (this.unsubDoc || this.retryTimer)) return;
     this.detachRemote();

@@ -25,8 +25,14 @@ for (const file of files) {
   hash.update(file).update(await readFile(join(OUT, file)));
 }
 const version = hash.digest("hex").slice(0, 16);
-// The page itself is cached under the scope URL, which is what navigations look up.
-const precache = files.map((file) => (file === "index.html" ? "./" : file));
+// Pages are cached under their directory URL, which is what navigations look up.
+const precache = files.map((file) =>
+  file === "index.html"
+    ? "./"
+    : file.endsWith("/index.html")
+      ? file.slice(0, -"index.html".length)
+      : file,
+);
 
 await writeFile(
   join(OUT, "sw.js"),

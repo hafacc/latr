@@ -71,6 +71,11 @@ android {
     buildFeatures {
         compose = true
     }
+    lint {
+        warningsAsErrors = true
+        // Version nags appear on their own as time passes; Dependabot handles them.
+        disable += setOf("OldTargetApi", "GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable")
+    }
     sourceSets {
         getByName("test") {
             // Shared with web: web/utils/*.spec.ts read the same fixture.
@@ -82,6 +87,7 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        allWarningsAsErrors.set(true)
     }
 }
 

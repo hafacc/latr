@@ -1,5 +1,6 @@
 package io.hafa.latr.ui.auth
 
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.hafa.latr.ui.theme.LatrTheme
 
+internal const val PRIVACY_URL = "https://latr.hafa.cc/privacy/"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountBottomSheet(
@@ -40,13 +43,14 @@ fun AccountBottomSheet(
     isAdmin: Boolean,
     loadPickCounts: suspend () -> List<Long>?,
     onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit,
+    onDeleteAccount: (keep: Boolean) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showStats by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -101,6 +105,14 @@ fun AccountBottomSheet(
                         .padding(vertical = 12.dp)
                 )
             }
+            Text(
+                text = "Privacy",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { uriHandler.openUri(PRIVACY_URL) }
+                    .padding(vertical = 12.dp)
+            )
             Spacer(modifier = Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = {
@@ -126,32 +138,32 @@ fun AccountBottomSheet(
     }
 
     if (showDeleteConfirm) {
+        val confirmDelete = { keep: Boolean ->
+            showDeleteConfirm = false
+            onDeleteAccount(keep)
+            onDismiss()
+        }
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete account?") },
-            text = {
-                Text(
-                    "This will remove all of your synced todos from the cloud and delete " +
-                        "your account. Todos on this device will not be affected."
-                )
-            },
+            title = { Text("Delete your account?") },
+            text = { Text("This deletes your account and everything synced to it.") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDeleteAccount()
-                        onDismiss()
-                    },
-                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel")
+                // Three buttons don't fit the dialog's row.
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("Cancel")
+                    }
+                    TextButton(onClick = { confirmDelete(true) }) {
+                        Text("Keep todos on this device")
+                    }
+                    TextButton(
+                        onClick = { confirmDelete(false) },
+                        colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Delete everything")
+                    }
                 }
             }
         )

@@ -27,7 +27,7 @@ class Converters {
     // nanos — the Timestamp constructor rejects negative nanoseconds.
     @TypeConverter
     fun toTimestamp(millis: Long?): Timestamp? = millis?.let {
-        Timestamp(Math.floorDiv(it, 1000), (Math.floorMod(it, 1000) * 1_000_000).toInt())
+        Timestamp(Math.floorDiv(it, 1000), Math.floorMod(it, 1000) * 1_000_000)
     }
 }
 
