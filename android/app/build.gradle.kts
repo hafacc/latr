@@ -27,7 +27,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "io.hafa.latr"
+        applicationId = "cc.hafa.latr"
         minSdk = 34
         targetSdk = 36
         versionCode = 1
