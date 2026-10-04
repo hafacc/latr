@@ -23,7 +23,7 @@ fun signingSetting(name: String): String? =
     keystoreProperties.getProperty(name) ?: providers.gradleProperty("latr.$name").orNull
 
 android {
-    namespace = "io.hafa.latr"
+    namespace = "cc.hafa.latr"
     compileSdk = 37
 
     defaultConfig {
