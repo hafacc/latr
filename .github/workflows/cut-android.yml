@@ -13,6 +13,14 @@ on:
           - patch
           - minor
           - major
+      status:
+        description: Play release status (draft until the app is public; a draft is rolled out by hand in the Play Console)
+        required: true
+        type: choice
+        default: draft
+        options:
+          - draft
+          - completed
 
 permissions:
   contents: read
@@ -96,8 +104,9 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STATUS: ${{ inputs.status }}
         run: >-
-          ./gradlew :app:publishReleaseBundle
+          ./gradlew :app:publishReleaseBundle --release-status "$STATUS"
           "-Platr.storeFile=$RUNNER_TEMP/upload.jks"
           "-Platr.storePassword=$STORE_PASSWORD"
           "-Platr.keyAlias=$KEY_ALIAS"
