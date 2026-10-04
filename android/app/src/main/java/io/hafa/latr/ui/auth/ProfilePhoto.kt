@@ -26,6 +26,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** In-memory URL→photo cache to avoid re-downloads. */
+private const val PHOTO_TIMEOUT_MS = 10_000
 private val photoCache = mutableMapOf<String, ImageBitmap>()
 
 @Composable
@@ -42,6 +43,8 @@ fun ProfilePhoto(
             runCatching {
                 (URL(url).openConnection() as HttpURLConnection).run {
                     doInput = true
+                    connectTimeout = PHOTO_TIMEOUT_MS
+                    readTimeout = PHOTO_TIMEOUT_MS
                     connect()
                     inputStream.use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
                 }

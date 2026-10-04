@@ -394,6 +394,7 @@ export class FirestoreTodoStore extends BaseTodoStore {
   private tombstone(): Record<string, unknown> {
     return {
       deleted: true,
+      text: "",
       modifiedAt: Date.now(),
       serverModifiedAt: serverTimestamp(),
     };
