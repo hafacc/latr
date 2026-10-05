@@ -182,7 +182,7 @@ function ThemeSegmented(): ReactElement {
   );
 }
 
-function GoogleMark(): ReactElement {
+export function GoogleMark(): ReactElement {
   return (
     <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
       <path

@@ -45,9 +45,13 @@ export default function Privacy(): ReactElement {
         sign-in and storage.
       </Section>
       <Section title="Delete your account">
-        Open Latr on the web or on Android, open the account menu, and choose
-        Delete account. Your todos, snooze counts and account are removed right
-        away. To have it deleted for you, email support@latr.hafa.cc.
+        Use the{" "}
+        <a href="../delete-account/" className="text-accent hover:underline">
+          delete account page
+        </a>
+        , or open Latr on the web or on Android, open the account menu, and
+        choose Delete account. Your todos, snooze counts and account are removed
+        right away. To have it deleted for you, email support@latr.hafa.cc.
       </Section>
       <p className="mt-7 mb-0">Deleting a single todo erases its text.</p>
     </main>
