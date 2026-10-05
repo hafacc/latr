@@ -114,10 +114,6 @@ export default function DeleteAccount(): ReactElement {
         </>
       )}
       <p className="mt-9 mb-0">
-        Can't sign in? Email support@latr.hafa.cc from the address on your
-        account and it will be deleted for you within 30 days.
-      </p>
-      <p className="mt-3 mb-0">
         The Android app has the same option in its account menu.
       </p>
     </main>
