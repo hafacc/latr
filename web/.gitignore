@@ -1,5 +1,4 @@
 node_modules/
-.next/
+.svelte-kit/
 out/
-*.tsbuildinfo
 .DS_Store

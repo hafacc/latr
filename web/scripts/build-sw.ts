@@ -1,4 +1,4 @@
-// Writes out/sw.js after `next build`: scripts/sw.js plus the list of built files, and a version that changes whenever any of them does.
+// Writes out/sw.js after `vite build`: scripts/sw.js plus the list of built files, and a version that changes whenever any of them does.
 import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
