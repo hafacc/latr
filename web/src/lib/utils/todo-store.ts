@@ -1,0 +1,419 @@
+import {
+  type CollectionReference,
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  where,
+  writeBatch,
+} from "firebase/firestore";
+import { db } from "./firebase";
+import { fromFirestore, readState, type Todo, toFirestoreFields } from "./todo";
+
+const STORAGE_KEY = "latr:todos:v1";
+
+// `== false` does NOT match docs missing the field; every doc is backfilled.
+const LIVE_ONLY = where("deleted", "==", false);
+
+const BASE_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 30_000;
+
+function rehydrateTimestamp(v: unknown): Timestamp | null {
+  if (v === null || v === undefined) return null;
+  else if (v instanceof Timestamp) return v;
+  else if (
+    typeof v === "object" &&
+    typeof (v as { seconds?: unknown }).seconds === "number" &&
+    typeof (v as { nanoseconds?: unknown }).nanoseconds === "number"
+  ) {
+    const obj = v as { seconds: number; nanoseconds: number };
+    return new Timestamp(obj.seconds, obj.nanoseconds);
+  } else return null;
+}
+
+export interface TodoStore {
+  getTodos(): Todo[];
+  isSyncing(): boolean;
+  subscribe(listener: () => void): () => void;
+  insert(todo: Todo): Promise<void>;
+  update(todo: Todo): Promise<void>;
+  delete(todo: Todo): Promise<void>;
+  clearAllDone(): Promise<Todo[]>;
+  restoreMany(todos: Todo[]): Promise<void>;
+  deleteEmptyTodosExcept(exceptId: string): Promise<void>;
+  dispose(): void;
+}
+
+abstract class BaseTodoStore implements TodoStore {
+  protected todos: Todo[] = [];
+  private listeners = new Set<() => void>();
+
+  getTodos(): Todo[] {
+    return this.todos;
+  }
+
+  abstract isSyncing(): boolean;
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  protected emit(): void {
+    for (const l of this.listeners) l();
+  }
+
+  protected clearListeners(): void {
+    this.listeners.clear();
+  }
+
+  abstract insert(todo: Todo): Promise<void>;
+  abstract update(todo: Todo): Promise<void>;
+  abstract delete(todo: Todo): Promise<void>;
+  abstract clearAllDone(): Promise<Todo[]>;
+  abstract restoreMany(todos: Todo[]): Promise<void>;
+  abstract deleteEmptyTodosExcept(exceptId: string): Promise<void>;
+  abstract dispose(): void;
+}
+
+export class LocalTodoStore extends BaseTodoStore {
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  // Deletes made while signed out; the sign-in merge pushes them up, then clears them.
+  private tombstones: Todo[] = [];
+
+  isSyncing(): boolean {
+    return false;
+  }
+
+  /** Read from localStorage. Not called from the constructor so SSR and first client render agree (hydration). */
+  hydrate(): void {
+    try {
+      const raw =
+        typeof window !== "undefined"
+          ? localStorage.getItem(STORAGE_KEY)
+          : null;
+      const parsed: Todo[] = raw ? JSON.parse(raw) : [];
+      const normalized = parsed.map((t) => ({
+        ...t,
+        state: readState(t.state),
+        // A missing `deleted` would reach Firestore as undefined, which it rejects.
+        deleted: t.deleted === true,
+        // JSON.parse leaves serverModifiedAt as a {seconds, nanoseconds}
+        // plain object; rehydrate it so the type signature isn't a lie.
+        serverModifiedAt: rehydrateTimestamp(t.serverModifiedAt),
+      }));
+      this.todos = normalized.filter((t) => !t.deleted);
+      this.tombstones = normalized.filter((t) => t.deleted);
+    } catch {
+      this.todos = [];
+      this.tombstones = [];
+    }
+    this.emit();
+  }
+
+  /** Live rows plus pending deletes — only the sign-in merge wants both. */
+  getWithTombstones(): Todo[] {
+    return [...this.todos, ...this.tombstones];
+  }
+
+  replaceAll(todos: Todo[]): void {
+    this.tombstones = [];
+    this.commit(todos);
+  }
+
+  /** Empties the store and its saved copy at once, so a later [hydrate] can't bring rows back. */
+  clear(): void {
+    this.replaceAll([]);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // best-effort
+    }
+  }
+
+  async insert(todo: Todo): Promise<void> {
+    this.commit([todo, ...this.todos]);
+  }
+
+  async update(todo: Todo): Promise<void> {
+    this.commit(this.todos.map((t) => (t.id === todo.id ? todo : t)));
+  }
+
+  async delete(todo: Todo): Promise<void> {
+    this.tombstone([todo]);
+    this.commit(this.todos.filter((t) => t.id !== todo.id));
+  }
+
+  async clearAllDone(): Promise<Todo[]> {
+    const done = this.todos.filter((t) => t.state === "DONE");
+    if (done.length === 0) return [];
+    this.tombstone(done);
+    this.commit(this.todos.filter((t) => t.state !== "DONE"));
+    return done;
+  }
+
+  async restoreMany(todos: Todo[]): Promise<void> {
+    if (todos.length === 0) return;
+    const restoredIds = new Set(todos.map((t) => t.id));
+    const existing = new Set(this.todos.map((t) => t.id));
+    const restored = todos
+      .filter((t) => !existing.has(t.id))
+      .map((t) => ({ ...t, deleted: false }));
+    // Commit unconditionally: dropping the tombstones has to reach localStorage
+    // even when the rows are somehow still live and there's nothing to re-add.
+    this.tombstones = this.tombstones.filter((t) => !restoredIds.has(t.id));
+    this.commit([...restored, ...this.todos]);
+  }
+
+  async deleteEmptyTodosExcept(exceptId: string): Promise<void> {
+    const next = this.todos.filter(
+      (t) => t.id === exceptId || t.text.trim().length > 0,
+    );
+    if (next.length !== this.todos.length) this.commit(next);
+  }
+
+  dispose(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+      // Flush the pending write so we don't lose the latest state.
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, this.persisted());
+      }
+    }
+    this.clearListeners();
+  }
+
+  // modifiedAt so the merge can last-write-wins this against a remote edit.
+  private tombstone(todos: Todo[]): void {
+    const ids = new Set(todos.map((t) => t.id));
+    this.tombstones = [
+      ...this.tombstones.filter((t) => !ids.has(t.id)),
+      ...todos.map((t) => ({ ...t, deleted: true, modifiedAt: Date.now() })),
+    ];
+  }
+
+  private commit(next: Todo[]): void {
+    this.todos = next;
+    this.schedulePersist();
+    this.emit();
+  }
+
+  private persisted(): string {
+    return JSON.stringify([...this.todos, ...this.tombstones]);
+  }
+
+  /** Saves now what [schedulePersist] would save shortly. */
+  flush(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+      localStorage.setItem(STORAGE_KEY, this.persisted());
+    }
+  }
+
+  private schedulePersist(): void {
+    if (typeof window === "undefined") return;
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = setTimeout(() => {
+      localStorage.setItem(STORAGE_KEY, this.persisted());
+      this.persistTimer = null;
+    }, 100);
+  }
+}
+
+/** Firestore-backed store; the snapshot listener is the sole source of truth. Deletes write tombstones, filtered out server-side. */
+export class FirestoreTodoStore extends BaseTodoStore {
+  private readonly col: CollectionReference;
+  private unsubscribe: (() => void) | null = null;
+  // True until the listener has received a snapshot with a live server
+  // connection. Flips back to true if the stream drops (e.g. tab backgrounded
+  // long enough for the WebChannel to close) until we reconnect.
+  private fromCache = true;
+  private retryAttempt = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(uid: string) {
+    super();
+    this.col = collection(db(), "users", uid, "todos");
+    this.attach();
+  }
+
+  isSyncing(): boolean {
+    return this.fromCache;
+  }
+
+  /** Retry now instead of waiting out backoff — called on tab-wake / online. */
+  reattach(): void {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.retryAttempt = 0;
+    if (!this.unsubscribe) this.attach();
+  }
+
+  async snapshot(): Promise<Todo[]> {
+    const snap = await getDocs(query(this.col, LIVE_ONLY));
+    return snap.docs.map((d) =>
+      fromFirestore(d.id, d.data() as Record<string, unknown>),
+    );
+  }
+
+  async insert(todo: Todo): Promise<void> {
+    this.todos = [todo, ...this.todos];
+    this.emit();
+    await setDoc(doc(this.col, todo.id), this.withServerTs(todo), {
+      merge: true,
+    });
+  }
+
+  async update(todo: Todo): Promise<void> {
+    const idx = this.todos.findIndex((t) => t.id === todo.id);
+    if (idx >= 0) {
+      const next = this.todos.slice();
+      next[idx] = todo;
+      this.todos = next;
+      this.emit();
+    }
+    await setDoc(doc(this.col, todo.id), this.withServerTs(todo), {
+      merge: true,
+    });
+  }
+
+  async delete(todo: Todo): Promise<void> {
+    this.todos = this.todos.filter((t) => t.id !== todo.id);
+    this.emit();
+    await setDoc(doc(this.col, todo.id), this.tombstone(), { merge: true });
+  }
+
+  async clearAllDone(): Promise<Todo[]> {
+    const done = this.todos.filter((t) => t.state === "DONE");
+    if (done.length === 0) return [];
+    this.todos = this.todos.filter((t) => t.state !== "DONE");
+    this.emit();
+    const batch = writeBatch(db());
+    for (const t of done) {
+      batch.set(doc(this.col, t.id), this.tombstone(), { merge: true });
+    }
+    await batch.commit();
+    return done;
+  }
+
+  async restoreMany(todos: Todo[]): Promise<void> {
+    if (todos.length === 0) return;
+    const restored = todos.map((t): Todo => ({ ...t, deleted: false }));
+    const existing = new Set(this.todos.map((t) => t.id));
+    const additions = restored.filter((t) => !existing.has(t.id));
+    if (additions.length > 0) {
+      this.todos = [...additions, ...this.todos];
+      this.emit();
+    }
+    const batch = writeBatch(db());
+    for (const t of restored) {
+      batch.set(doc(this.col, t.id), this.withServerTs(t), { merge: true });
+    }
+    await batch.commit();
+  }
+
+  async deleteEmptyTodosExcept(exceptId: string): Promise<void> {
+    const toDelete = this.todos.filter(
+      (t) => t.id !== exceptId && t.text.trim().length === 0,
+    );
+    if (toDelete.length === 0) return;
+    const keepIds = new Set(
+      this.todos.filter((t) => !toDelete.includes(t)).map((t) => t.id),
+    );
+    this.todos = this.todos.filter((t) => keepIds.has(t.id));
+    this.emit();
+    const batch = writeBatch(db());
+    for (const t of toDelete) batch.delete(doc(this.col, t.id));
+    await batch.commit();
+  }
+
+  /** Wipe every doc in this user's todos collection. Used by delete-account. */
+  async deleteAll(): Promise<void> {
+    const snap = await getDocs(this.col);
+    if (snap.empty) return;
+    const batch = writeBatch(db());
+    for (const d of snap.docs) batch.delete(d.ref);
+    await batch.commit();
+  }
+
+  dispose(): void {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
+    this.clearListeners();
+  }
+
+  private attach(): void {
+    if (this.unsubscribe) return;
+    this.fromCache = true;
+    this.unsubscribe = onSnapshot(
+      query(this.col, LIVE_ONLY),
+      // includeMetadataChanges fires the listener when fromCache flips (e.g.
+      // live connection re-established after a backgrounded tab) even if no
+      // doc data changed, so the sync indicator can reflect reconnect state.
+      { includeMetadataChanges: true },
+      (snap) => {
+        // A server-confirmed emission means the listener is healthy again.
+        if (!snap.metadata.fromCache) this.retryAttempt = 0;
+        this.todos = snap.docs.map((d) =>
+          fromFirestore(d.id, d.data() as Record<string, unknown>),
+        );
+        this.fromCache = snap.metadata.fromCache;
+        this.emit();
+      },
+      (err) => {
+        // A delivered error terminates this listener; re-register with backoff.
+        console.error("firestore snapshot", err);
+        this.unsubscribe = null;
+        this.fromCache = true;
+        this.emit();
+        this.scheduleReattach();
+      },
+    );
+  }
+
+  private scheduleReattach(): void {
+    if (this.retryTimer !== null) return;
+    const backoff = Math.min(
+      MAX_RETRY_DELAY_MS,
+      BASE_RETRY_DELAY_MS * 2 ** this.retryAttempt,
+    );
+    this.retryAttempt++;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.attach();
+    }, backoff);
+  }
+
+  private withServerTs(todo: Todo): Record<string, unknown> {
+    return {
+      ...toFirestoreFields(todo),
+      serverModifiedAt: serverTimestamp(),
+    };
+  }
+
+  // set/merge (not update) so a missing doc doesn't abort the batch.
+  private tombstone(): Record<string, unknown> {
+    return {
+      deleted: true,
+      text: "",
+      modifiedAt: Date.now(),
+      serverModifiedAt: serverTimestamp(),
+    };
+  }
+}

@@ -5,12 +5,11 @@ updates:
     schedule:
       interval: monthly
     groups:
-      react:
+      svelte:
         patterns:
-          - react
-          - react-dom
-          - "@types/react"
-          - "@types/react-dom"
+          - svelte
+          - svelte-check
+          - "@sveltejs/*"
   - package-ecosystem: bun
     directory: /firebase
     schedule:

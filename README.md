@@ -1,6 +1,6 @@
 # latr
 
-A todo list for things to do latr. Native Android app and Next.js web client, synced via Firestore.
+A todo list for things to do latr. Native Android app and SvelteKit web client, synced via Firestore.
 
 Live: https://latr.hafa.cc/
 
