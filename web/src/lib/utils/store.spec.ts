@@ -12,6 +12,7 @@ function todo(id: string): Todo {
     serverModifiedAt: null,
     snoozeUntil: null,
     pinned: false,
+    position: null,
     deleted: false,
   };
 }

@@ -2,6 +2,7 @@ package cc.hafa.latr.ui
 
 import cc.hafa.latr.data.Todo
 import cc.hafa.latr.util.LocalDateTimeUtil
+import cc.hafa.latr.util.Position
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -11,14 +12,11 @@ data class TodoGroup(val label: String, val todos: List<Todo>)
 
 private fun Long.localDate(zone: ZoneId): LocalDate = Instant.ofEpochMilli(this).atZone(zone).toLocalDate()
 
-private fun activeSortKey(todo: Todo, zone: ZoneId): Long =
-    todo.snoozeUntil?.let { LocalDateTimeUtil.toEpochMillis(it, zone) } ?: todo.modifiedAt
-
-private fun groupByPastKey(todos: List<Todo>, keyFn: (Todo) -> Long, today: LocalDate, zone: ZoneId): List<TodoGroup> {
+private fun groupByPastKey(todos: List<Todo>, keyFn: (Todo) -> String, today: LocalDate, zone: ZoneId): List<TodoGroup> {
     val labels = listOf("Today", "Yesterday", "This week", "Earlier")
     val buckets = labels.map { mutableListOf<Todo>() }
     for (todo in todos) {
-        val day = keyFn(todo).localDate(zone)
+        val day = Position.keyTime(keyFn(todo)).localDate(zone)
         val index = when {
             !day.isBefore(today) -> 0
             !day.isBefore(today.minusDays(1)) -> 1
@@ -60,8 +58,8 @@ fun groupForFilter(
         StatusFilter.ACTIVE -> {
             val (pinned, rest) = sorted.partition { it.pinned }
             val pinnedGroup = if (pinned.isEmpty()) emptyList() else listOf(TodoGroup("Pinned", pinned))
-            pinnedGroup + groupByPastKey(rest, { activeSortKey(it, zone) }, today, zone)
+            pinnedGroup + groupByPastKey(rest, { it.activeKey(zone) }, today, zone)
         }
-        StatusFilter.DONE, StatusFilter.ALL -> groupByPastKey(sorted, { it.modifiedAt }, today, zone)
+        StatusFilter.DONE, StatusFilter.ALL -> groupByPastKey(sorted, { it.ownKey() }, today, zone)
     }
 }

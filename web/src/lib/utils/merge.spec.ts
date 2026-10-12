@@ -12,6 +12,7 @@ function todo(overrides: Partial<Todo> = {}): Todo {
     serverModifiedAt: overrides.serverModifiedAt ?? null,
     snoozeUntil: overrides.snoozeUntil ?? null,
     pinned: overrides.pinned ?? false,
+    position: overrides.position ?? null,
     deleted: overrides.deleted ?? false,
   };
 }

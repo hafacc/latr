@@ -43,10 +43,10 @@ Track features and behavior here. When making changes, verify existing behavior 
 - No extra space should appear below the search bar when focusing a todo
 
 ### Undo
-- The undo buffer holds one most-recent action — a delete, a snooze, or a complete. A later action of any kind overwrites the prior buffer (single slot, most-recent-wins)
-- The buffer is a tagged entry: web `lastUndo: { kind: "delete" | "snooze" | "complete"; todos }` in the UI reducer; Android a private `UndoableAction` sealed type (`Delete` | `Snooze` | `Complete`) on the ViewModel
+- The undo buffer holds one most-recent action — a delete, a snooze, a complete, or (web) a move. A later action of any kind overwrites the prior buffer (single slot, most-recent-wins)
+- The buffer is a tagged entry: web `lastUndo: { kind: "delete" | "snooze" | "complete" | "move"; todos }` in the UI reducer; Android a private `UndoableAction` sealed type (`Delete` | `Snooze` | `Complete`) on the ViewModel
 - Undo chip auto-expires after 5 seconds; cancelled when changing filters or creating a new todo
-- Web shows it as a floating snackbar (`undo-snackbar.svelte`): a pill at the bottom centre (dark in both themes) (above the dock on phones) with the action label, an Undo button, a ⌘Z (Ctrl+Z off Mac) hint on desktop, and a hairline that drains over the 5 seconds. Both platforms label it Completed / Snoozed / Deleted (one todo) / Deleted N todos (several)
+- Web shows it as a floating snackbar (`undo-snackbar.svelte`): a pill at the bottom centre (dark in both themes) (above the dock on phones) with the action label, an Undo button, a ⌘Z (Ctrl+Z off Mac) hint on desktop, and a hairline that drains over the 5 seconds. Both platforms label it Completed / Snoozed / Deleted (one todo) / Deleted N todos (several); web adds Moved
 
 #### Delete
 - "Clear all done" appears only on the Done filter with a non-empty done list. Web: a "Clear all" text button in the list header (desktop) / app bar (phone), so it never shares a slot with the undo snackbar. Android: a "Clear all" text button in the top bar on the Done filter, next to search
@@ -60,6 +60,9 @@ Track features and behavior here. When making changes, verify existing behavior 
 - Snooze undo restores via the normal update path (the row still exists, unlike a delete which re-inserts); `serverModifiedAt` bumps on the write so it passes the server-time rule
 - Web: `lastUndo` drives the same chip as delete (label "Snoozed"), and ⌘/Ctrl+Z reverts it. Android: snooze undo shares the delete machinery — `snoozeUndoable` on the ViewModel buffers the pre-snooze snapshot as `UndoableAction.Snooze`, arms the shared undo snackbar, and applies the snooze; tapping Undo re-applies that snapshot through the normal update path
 - Snooze undo only surfaces on the filter where the snooze happened (Active/Snoozed); a filter change clears it, so it never competes with "Clear all done" on the Done filter
+
+#### Move (web)
+- Dropping a row somewhere new (see [Reordering](#reordering)) shows the "Undo" chip, labeled "Moved"; undo restores the pre-move snapshot (prior `position`/`snoozeUntil`/`modifiedAt`) through the update path, like snooze and complete undo (`app.move` buffers `{ kind: "move" }`)
 
 #### Complete
 - Marking a todo done shows the "Undo" chip; tapping it restores the pre-done snapshot (prior state/snoozeUntil/modifiedAt), so it lands back in its previous sort position — mechanically identical to snooze undo (the row still exists, restored via the update path)
@@ -97,15 +100,30 @@ Track features and behavior here. When making changes, verify existing behavior 
 - Corrupt rows from that era (`state: "ACTIVE"` with a future `snoozeUntil`) **heal themselves** under the derived rule: they simply read as snoozed until their time passes. No repair migration was needed. Rows whose `DONE` was overwritten are unrecoverable (the state was destroyed) and must be re-completed by hand.
 
 ### Sort Order
-- Active: by `activeSortKey` (`utils/todo.ts`) — snoozeUntil (unsnoozed, most recently unsnoozed first) else modifiedAt — descending. Every filter's final tie-break is `id` (a stable uuid) so equal-time rows never flip-flop. The **web** sort ignores `pinned` (pinning is a grouping concern, below); **Android** keeps pinned-first in its sort, which also puts the Pinned group first.
-- Snoozed: by snooze time ascending
-- Done, All: by modifiedAt descending
+- Every list orders by a text **key**, newest first (web `ownKey`/`activeKey`/`listKey` in `utils/todo.ts`, Android the same names in `ui/TodoFilter.kt`). A row's own key is its `position` if a move wrote one, else its modify time as 13 digits followed by its id (`timeKey(modifiedAt) + idKey(id)`), so an unmoved row sorts exactly where its time puts it and stores nothing.
+- Active: an unsnoozed row's key is its unsnooze time in front of its own key (`timeKey(snoozeUntil) + ownKey`), so it sits at its unsnooze time and rows that woke together keep their own order; every other row uses its own key. The **web** sort ignores `pinned` (pinning is a grouping concern, below); **Android** keeps pinned-first in its sort, which also puts the Pinned group first.
+- Snoozed: by snooze time ascending, then own key (so rows snoozed to one time order by position, else modify time)
+- Done, All: by own key
+- The last tie-break is `id`; keys only tie for one todo, so it is a backstop.
+
+### Reordering
+- **Web only for now.** Android has no built-in way to drag rows in a list, and the choice was a third-party library (`sh.calvin.reorderable`) or untried gesture code, so it was left off. Android still reads `position` and orders by it exactly as web does, and clears it on the same changes, so a move made on web shows on the phone.
+- On web any row can be dragged to a new place, in every filter; not while searching (results are in relevance order). A move writes **one field on the moved todo only**, `position`: text that sorts between its two new neighbors' keys. Nothing else is rewritten, so moves of different todos on different devices can't conflict; the same todo moved twice takes the later write.
+- **Keys** (web `utils/position.ts`; Android `util/Position.kt` has the reading half, `timeKey`/`keyTime`/`idKey`/`readPosition`; both run `testdata/position-fixtures.json`): text over `0-9a-z` compared by code unit, always starting with a 13-digit millisecond time, which is what the date headings read (`keyTime`). A written position ends with the todo's id (`idKey`: the id's letters and digits, lowercased, plus `z`), so no two todos ever share a key and a third row can always go between two others. `readPosition` drops a saved value that isn't a key (it reads as unmoved).
+- **The half rule** (`positionBetween(lo, hi, id)`): the new position's time is halfway between the two keys' times. Once those are the same or a millisecond apart there is no time between, so it falls back to `between(lo, hi)`: text strictly between the two keys. There is always room, so it never runs out however often one gap is split (keys grow about one character per five moves into the same gap); it only moves a digit to a digit, so the leading time stays a time, and the final `z` of every key keeps one from ending in the lowest character, which is the one case with no room below it.
+- **Where a drop lands** (`planMove` in `utils/reorder.ts`): between two rows it is halfway between them. At the top or bottom of a date heading it is halfway between the neighboring row and the heading's edge (`floor`/`ceiling` on the bucket: the midnights the heading runs between; Today's upper edge is now, Earlier's lower edge is time 0). So "end of Today" is halfway from Today's last row down to this morning's midnight, and "start of Yesterday" is halfway from Yesterday's first row up to it: different drops. Pinned and the rows snoozed to one time have no date edge, so their top and bottom land beside the neighbor, inside its millisecond (`positionAbove`/`positionBelow`, also the fallback when an edge leaves no room). A heading that isn't shown (no rows) can't be dropped into.
+- A move bumps `modifiedAt` (a move is an edit) and, on a row that isn't snoozed, clears `snoozeUntil`: a moved unsnoozed row becomes a normal row. A snoozed row moved in All keeps its snooze; when it wakes it sits at its unsnooze time in Active (the unsnooze time leads its key) and stays where it was put in All, with nothing written.
+- **One position, every list.** Active, Done and All share the field, so a move in one shows in the others.
+- Active: a row only moves within its own side of Pinned (pinned rows among pinned rows, the rest among the rest); the drop is refused otherwise.
+- Snoozed: a row only moves among rows snoozed to exactly its time (the list is otherwise in snooze-time order). The position is made from those neighbors' own keys, so the row also moves in All, and the group keeps that order in Active when it wakes.
+- Complete, snooze, restore and pin clear `position` (web sets `position: null` in each; Android in `updateTodo` when `touchModifiedAt`), so the row lands on top as before. Editing text keeps it (an edit never moved a row), except the first edit of an unsnoozed row, which drops the unsnoozed mark and the position together and stays at the unsnooze time.
+- **The drag**: on desktop a grip (tooltip "Drag to move") fades in left of the row on hover; press it to drag. On touch, a 400 ms press on a row picks it up (not while its text is being edited; `contextmenu` and text selection are suppressed for it). `todo-list.svelte` owns the drag: it measures every allowed drop once at pick-up (`planMove` for each slot), follows the pointer on `window`, moves the dragged row with a transform and shifts the rows and headings between it and the nearest allowed drop by one row height so a gap opens there, scrolls the page near the top and bottom edges, and cancels on Escape. The drop is planned again against the current list before it is saved. There is no keyboard way to move a row.
 
 ### Grouping
 - The web list renders in buckets whose key is the *same* key the list is sorted by, so a row's bucket and its position can never disagree. (The old modifiedAt-only grouping fought the Active sort: a recently-unsnoozed row sorted at the top but fell into a late date bucket.) `groupForFilter` (`utils/group.ts`) buckets an already-sorted list, preserving order within each bucket.
-- Active: a **Pinned** bucket on top (all pinned rows), then date buckets Today / Yesterday / This week / Earlier keyed on `activeSortKey` — so an unsnoozed row buckets by its unsnooze time. Pinned rows appear only in the Pinned bucket.
+- Active: a **Pinned** bucket on top (all pinned rows), then date buckets Today / Yesterday / This week / Earlier keyed on the time `activeKey` starts with — so an unsnoozed row buckets by its unsnooze time, and a moved row by the time its position starts with. Pinned rows appear only in the Pinned bucket.
 - Snoozed: Later today / Tomorrow / This week / Later keyed on snoozeUntil.
-- Done, All: date buckets keyed on modifiedAt.
+- Done, All: date buckets keyed on the time `ownKey` starts with (modifiedAt for an unmoved row).
 - Search: one unlabeled group (relevance-ranked, so date/pinned buckets would be meaningless).
 - Android renders the same groups (`ui/TodoGroups.kt`, a port of `group.ts`, unit-tested) as `LazyColumn` header items with the same counts; none while searching.
 - Counts (filter title, sidebar/filter bar, group headers) show only when > 0, on both platforms.
@@ -134,7 +152,7 @@ Track features and behavior here. When making changes, verify existing behavior 
 
 ## Firestore schema
 
-`users/{uid}/todos/{todoId}` — each doc: `{ text, state: "ACTIVE"|"DONE", createdAt, modifiedAt, snoozeUntil, pinned }`. Rules in `firebase/firestore.rules` restrict reads and writes to the owning `uid`.
+`users/{uid}/todos/{todoId}` — each doc: `{ text, state: "ACTIVE"|"DONE", createdAt, modifiedAt, snoozeUntil, pinned, position }` (`position` is null or missing until the todo is moved; see [Reordering](#reordering); Room column added in schema v13). Rules in `firebase/firestore.rules` restrict reads and writes to the owning `uid`.
 
 There is no `SNOOZED` state — see [Snooze is derived](#snooze-is-derived). Docs written by older clients still carry one; both clients map it to `ACTIVE` on read (web `readState` in `utils/todo.ts`, Android `Todo.readState`, and the Room `Converters.toTodoState`, which must not use `valueOf`), so `snoozeUntil` alone decides.
 
@@ -248,4 +266,7 @@ The key, `keystore.properties`, `play-service-account.json` and `google-services
 - Android excludes its snooze identity prefs from cloud backup and device transfer; a restore without them clears the Room counts, so a restored or new phone never adds another phone's signed-out counts to an account.
 - Taking votes uses the counts the device last saw, so a device that was offline, or two snoozing at once, can take slightly too much or too little.
 - Signed out, web tabs share one copy of the counts through localStorage (re-read before each commit, plus a `storage` listener); two tabs committing in the same millisecond can still lose one.
+- A build from before reordering doesn't know `position`: it orders by time only, and its complete/snooze/restore/pin leave a moved row's position in place, so on current builds that row stays where it was put instead of going to the top.
+- Android can't reorder; it shows the order set on web. Web's drag was driven in headless Chrome (mouse and emulated touch), not on real phones.
+- Web shows the drag grip only at desktop width; a narrow window with a mouse has no way to start a move.
 - Deploy order matters: a client still on an older build **hard-deletes**, writing no tombstone, so the merge protection is only real once both clients are updated.

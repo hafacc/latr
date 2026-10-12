@@ -16,6 +16,7 @@ const label = $derived.by(() => {
   if (!entry) return "";
   else if (entry.kind === "snooze") return "Snoozed";
   else if (entry.kind === "complete") return "Completed";
+  else if (entry.kind === "move") return "Moved";
   else if (entry.todos.length === 1) return "Deleted";
   else return `Deleted ${entry.todos.length} todos`;
 });

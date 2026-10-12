@@ -1,11 +1,12 @@
 <script lang="ts">
 import Check from "@lucide/svelte/icons/check";
 import Clock from "@lucide/svelte/icons/clock";
+import GripVertical from "@lucide/svelte/icons/grip-vertical";
 import Pin from "@lucide/svelte/icons/pin";
 import PinOff from "@lucide/svelte/icons/pin-off";
 import Trash2 from "@lucide/svelte/icons/trash-2";
 import Undo2 from "@lucide/svelte/icons/undo-2";
-import { flushSync, untrack } from "svelte";
+import { flushSync, onDestroy, untrack } from "svelte";
 import { getAppState } from "../utils/app-state.svelte";
 import { formatSnoozeTime } from "../utils/format";
 import { getModifierState } from "../utils/kbd-modifier.svelte";
@@ -77,7 +78,27 @@ const hoverAction =
 const actionButton =
   "relative w-7 h-7 flex items-center justify-center rounded-lg hover:bg-surface-muted transition-colors";
 
-let { todo }: { todo: Todo } = $props();
+// How long a touch rests on a row before it picks the row up, and how far it may wander first.
+const LONG_PRESS_MS = 400;
+const LONG_PRESS_SLOP_PX = 8;
+
+let {
+  todo,
+  movable,
+  dragged,
+  offset,
+  gliding,
+  onDragStart,
+}: {
+  todo: Todo;
+  movable: boolean;
+  dragged: boolean;
+  // How far the row sits from its place: dragged there, or stepping aside for the dragged row.
+  offset: number;
+  // Glide to `offset` rather than jump, while another row is being dragged.
+  gliding: boolean;
+  onDragStart: (event: PointerEvent) => void;
+} = $props();
 
 const app = getAppState();
 const modifier = getModifierState();
@@ -94,6 +115,8 @@ let editor = $state<TextEditorHandle | null>(null);
 let pendingCaret: { x: number; y: number } | null = null;
 let drag: Drag | null = null;
 let suppressClick = false;
+let pressTimer: number | null = null;
+let pickedUp = false;
 
 const focused = $derived(app.focusId === todo.id);
 const text = $derived(isFocused ? draft : todo.text);
@@ -175,6 +198,15 @@ function runSwipe(action: SwipeAction) {
   }
 }
 
+function clearPress() {
+  if (pressTimer !== null) {
+    window.clearTimeout(pressTimer);
+    pressTimer = null;
+  }
+}
+
+onDestroy(clearPress);
+
 function onPointerDown(e: PointerOnRow) {
   if (e.pointerType !== "touch") return;
   if (isFocused) return;
@@ -186,12 +218,24 @@ function onPointerDown(e: PointerOnRow) {
     width: e.currentTarget.offsetWidth,
     lock: "pending",
   };
+  if (movable) {
+    clearPress();
+    pressTimer = window.setTimeout(() => {
+      pressTimer = null;
+      drag = null;
+      pickedUp = true;
+      suppressClick = true;
+      navigator.vibrate?.(10);
+      onDragStart(e);
+    }, LONG_PRESS_MS);
+  }
 }
 
 function onPointerMove(e: PointerOnRow) {
   if (!drag || drag.pointerId !== e.pointerId) return;
   const moveX = e.clientX - drag.x;
   const moveY = e.clientY - drag.y;
+  if (Math.hypot(moveX, moveY) > LONG_PRESS_SLOP_PX) clearPress();
   if (drag.lock === "pending") {
     drag.lock = lockDirection(moveX, moveY);
     if (drag.lock === "vertical") {
@@ -208,6 +252,13 @@ function onPointerMove(e: PointerOnRow) {
 }
 
 function endDrag(e: PointerOnRow, cancelled: boolean) {
+  clearPress();
+  if (pickedUp) {
+    pickedUp = false;
+    window.setTimeout(() => {
+      suppressClick = false;
+    }, 0);
+  }
   const ended = drag;
   if (!ended || ended.pointerId !== e.pointerId) return;
   drag = null;
@@ -223,7 +274,7 @@ function endDrag(e: PointerOnRow, cancelled: boolean) {
 
 // The native mousedown focus would land on the static text, which the editor replaces mid-event.
 function onTextMouseDown(e: MouseEvent) {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || suppressClick) return;
   e.preventDefault();
   const start = { x: e.clientX, y: e.clientY };
   pendingCaret = start;
@@ -297,6 +348,11 @@ function closeSnooze() {
   onpointermove={onPointerMove}
   onpointerup={(e) => endDrag(e, false)}
   onpointercancel={(e) => endDrag(e, true)}
+  oncontextmenu={(e) => {
+    // A long touch is picking the row up, not asking for the browser's menu.
+    if (pressTimer !== null || pickedUp) e.preventDefault();
+  }}
+  style:transform={offset !== 0 ? `translateY(${offset}px)` : null}
   onmouseenter={() => {
     isHovered = true;
   }}
@@ -313,8 +369,31 @@ function closeSnooze() {
     "group/row relative rounded-[10px] touch-pan-y touch-pinch-zoom scroll-mt-20 max-md:scroll-mt-[calc(env(safe-area-inset-top)+64px)] max-md:scroll-mb-[calc(env(safe-area-inset-bottom)+104px)]",
     dx !== 0 && "overflow-hidden",
     snoozeOpen && "z-20",
+    dragged && "z-20",
+    gliding && "transition-transform duration-150 ease-out",
   ]}
 >
+  {#if desktop.current && movable}
+    <!-- Hidden by opacity alone, so the pointer reaching it in the gutter counts as hovering the row. Preventing the down keeps the press from selecting text as the row is dragged. -->
+    <button
+      type="button"
+      tabindex="-1"
+      onpointerdown={(e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        onDragStart(e);
+      }}
+      aria-label="Drag to move"
+      title="Drag to move"
+      class={[
+        "absolute -left-6 top-1.5 w-6 h-7 flex items-center justify-center rounded-lg text-text-secondary hover:bg-surface-muted cursor-grab touch-none transition-[opacity,background-color] group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-[keep-actions=true]/row:opacity-100",
+        dragged ? "opacity-100" : "opacity-0",
+      ]}
+    >
+      <GripVertical class="w-4 h-4" />
+    </button>
+  {/if}
+
   {#if swipe}
     <div
       aria-hidden="true"
@@ -335,8 +414,8 @@ function closeSnooze() {
       settling = false;
     }}
     class={[
-      "relative flex items-start gap-3 min-h-10 max-md:min-h-14 px-3 py-[9px] max-md:py-[15px] rounded-[10px] hover:bg-surface-hover focus-within:bg-surface-hover",
-      dx !== 0 ? "bg-surface-hover shadow-dock" : "bg-bg",
+      "relative flex items-start gap-3 min-h-10 max-md:min-h-14 px-3 py-[9px] max-md:py-[15px] rounded-[10px] group-hover/row:bg-surface-hover focus-within:bg-surface-hover",
+      dx !== 0 || dragged ? "bg-surface-hover shadow-dock" : "bg-bg",
       settling
         ? "transition-transform duration-200 ease-out"
         : "transition-colors",
@@ -397,7 +476,7 @@ function closeSnooze() {
             onmousedown={onTextMouseDown}
             onfocus={() => app.setFocus(todo.id)}
             class={[
-              "flex-1 min-w-0 whitespace-pre-wrap break-words outline-none text-[15px] leading-[22px] max-md:text-[16px] max-md:leading-6",
+              "flex-1 min-w-0 whitespace-pre-wrap break-words outline-none text-[15px] leading-[22px] max-md:text-[16px] max-md:leading-6 pointer-coarse:select-none pointer-coarse:[-webkit-touch-callout:none]",
               textTone,
             ]}
           >

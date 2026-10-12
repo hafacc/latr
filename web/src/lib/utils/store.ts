@@ -1,10 +1,10 @@
 import type { SnoozeUndo } from "./snooze-stats-store";
 import type { Filter, Todo } from "./todo";
 
-// Most-recent-wins undo: "delete" restores via re-insert, "snooze"/"complete" via update.
+// Most-recent-wins undo: "delete" restores via re-insert, the others via update.
 export const UNDO_MS = 5000;
 
-export type UndoKind = "delete" | "snooze" | "complete";
+export type UndoKind = "delete" | "snooze" | "complete" | "move";
 export type UndoEntry = {
   kind: UndoKind;
   todos: Todo[];

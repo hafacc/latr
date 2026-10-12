@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
+import cc.hafa.latr.util.Position
 import java.util.UUID
 
 enum class TodoState { ACTIVE, DONE }
@@ -19,6 +20,8 @@ data class Todo(
     val state: TodoState = TodoState.ACTIVE,
     val snoozeUntil: String? = null,
     val pinned: Boolean = false,
+    /** Where a move put the row; null orders it by its time. */
+    val position: String? = null,
     val deleted: Boolean = false,
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
@@ -29,6 +32,7 @@ data class Todo(
         "state" to state.name,
         "snoozeUntil" to snoozeUntil,
         "pinned" to pinned,
+        "position" to position,
         "deleted" to deleted,
     )
 
@@ -48,6 +52,7 @@ data class Todo(
                 state = readState(data["state"] as? String),
                 snoozeUntil = data["snoozeUntil"] as? String,
                 pinned = data["pinned"] as? Boolean ?: false,
+                position = Position.readPosition(data["position"]),
                 deleted = data["deleted"] as? Boolean ?: false,
             )
         }

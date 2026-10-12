@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Timestamp } from "firebase/firestore";
+import { timeKey } from "./position";
 import {
   epochToIso,
   fromFirestore,
@@ -24,6 +25,7 @@ function todo(overrides: Partial<Todo> = {}): Todo {
     serverModifiedAt: overrides.serverModifiedAt ?? null,
     snoozeUntil: overrides.snoozeUntil ?? null,
     pinned: overrides.pinned ?? false,
+    position: overrides.position ?? null,
     deleted: overrides.deleted ?? false,
   };
 }
@@ -254,6 +256,54 @@ describe("sortForFilter", () => {
       "newer",
       "older",
     ]);
+  });
+
+  test("a moved row orders by its position, not its modify time", () => {
+    const top = todo({ id: "top", modifiedAt: 300 });
+    const bottom = todo({ id: "bottom", modifiedAt: 100 });
+    const moved = todo({
+      id: "moved",
+      modifiedAt: 900,
+      position: `${timeKey(200)}movedz`,
+    });
+    for (const filter of ["ACTIVE", "DONE", "ALL"] as const) {
+      expect(
+        sortForFilter([moved, bottom, top], filter).map((t) => t.id),
+      ).toEqual(["top", "moved", "bottom"]);
+    }
+  });
+
+  test("ACTIVE: an unsnoozed row sits at its unsnooze time whatever its position", () => {
+    const woke = todo({
+      id: "woke",
+      snoozeUntil: epochToIso(5000),
+      position: `${timeKey(10)}wokez`,
+    });
+    const plain = todo({ id: "plain", modifiedAt: 1000 });
+    expect(sortForFilter([plain, woke], "ACTIVE").map((t) => t.id)).toEqual([
+      "woke",
+      "plain",
+    ]);
+    expect(sortForFilter([plain, woke], "ALL").map((t) => t.id)).toEqual([
+      "plain",
+      "woke",
+    ]);
+  });
+
+  test("SNOOZED: rows snoozed to one time order by position, then modify time", () => {
+    const sameTime = epochToIso(5000);
+    const older = todo({ id: "older", modifiedAt: 100, snoozeUntil: sameTime });
+    const newer = todo({ id: "newer", modifiedAt: 200, snoozeUntil: sameTime });
+    const moved = todo({
+      id: "moved",
+      modifiedAt: 50,
+      snoozeUntil: sameTime,
+      position: `${timeKey(150)}movedz`,
+    });
+    const sooner = todo({ id: "sooner", snoozeUntil: epochToIso(1000) });
+    expect(
+      sortForFilter([older, moved, sooner, newer], "SNOOZED").map((t) => t.id),
+    ).toEqual(["sooner", "newer", "moved", "older"]);
   });
 
   test("SNOOZED: earliest snoozeUntil first", () => {
