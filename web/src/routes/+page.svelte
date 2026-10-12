@@ -17,7 +17,7 @@ import {
   isCommandChord,
   isEditableTarget,
 } from "../lib/utils/keyboard";
-import { FILTERS, matchesFilter, rankBySearch } from "../lib/utils/todo";
+import { matchesFilter, rankBySearch } from "../lib/utils/todo";
 
 const SIDEBAR_COLLAPSED_KEY = "latr:sidebar:v1";
 
@@ -71,15 +71,6 @@ function onSearchKey(e: KeyboardEvent) {
   if (isEditableTarget(e.target)) return;
   e.preventDefault();
   listHeader.focusSearch();
-}
-
-function onFilterKey(e: KeyboardEvent) {
-  if (isEditableTarget(e.target) || hasModifier(e)) return;
-  const index = Number.parseInt(e.key, 10);
-  if (index >= 1 && index <= FILTERS.length) {
-    e.preventDefault();
-    app.setFilter(FILTERS[index - 1]);
-  }
 }
 
 function onArrowKey(e: KeyboardEvent) {
@@ -160,7 +151,6 @@ function onUndoKey(e: KeyboardEvent) {
 
 function onKey(e: KeyboardEvent) {
   onSearchKey(e);
-  onFilterKey(e);
   onArrowKey(e);
 }
 
