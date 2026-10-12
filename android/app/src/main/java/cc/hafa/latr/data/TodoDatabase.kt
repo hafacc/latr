@@ -33,7 +33,7 @@ class Converters {
 
 @Database(
     entities = [Todo::class, SnoozeSetEntity::class, SnoozeTodEntity::class, SnoozePickEntity::class],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -79,6 +79,12 @@ abstract class TodoDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE todos ADD COLUMN position TEXT")
+            }
+        }
+
         // v9: serverModifiedAt → nullable (Timestamp via Converter); destructive.
         fun getDatabase(context: Context): TodoDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -87,7 +93,7 @@ abstract class TodoDatabase : RoomDatabase() {
                     TodoDatabase::class.java,
                     "todo_database"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance

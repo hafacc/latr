@@ -12,6 +12,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { readPosition } from "./position";
 import { fromFirestore, readState, type Todo, toFirestoreFields } from "./todo";
 
 const STORAGE_KEY = "latr:todos:v1";
@@ -104,6 +105,7 @@ export class LocalTodoStore extends BaseTodoStore {
         state: readState(t.state),
         // A missing `deleted` would reach Firestore as undefined, which it rejects.
         deleted: t.deleted === true,
+        position: readPosition(t.position),
         // JSON.parse leaves serverModifiedAt as a {seconds, nanoseconds}
         // plain object; rehydrate it so the type signature isn't a lie.
         serverModifiedAt: rehydrateTimestamp(t.serverModifiedAt),

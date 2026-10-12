@@ -29,7 +29,7 @@ class TodoMapTest {
         assertEquals(
             setOf(
                 "text", "createdAt", "modifiedAt", "serverModifiedAt",
-                "state", "snoozeUntil", "pinned", "deleted",
+                "state", "snoozeUntil", "pinned", "position", "deleted",
             ),
             map.keys,
         )
@@ -123,5 +123,14 @@ class TodoMapTest {
         assertEquals(true, Todo.fromMap("id", mapOf("deleted" to true)).deleted)
         assertEquals(false, Todo.fromMap("id", mapOf("deleted" to "true")).deleted)
         assertEquals(false, Todo.fromMap("id", mapOf("deleted" to 1)).deleted)
+    }
+
+    @Test
+    fun `position round-trips, and one this build can't order by reads as none`() {
+        val position = "1700000000000abcz"
+        assertEquals(position, Todo(position = position).toMap()["position"])
+        assertEquals(position, Todo.fromMap("id", mapOf("position" to position)).position)
+        assertNull(Todo.fromMap("id", mapOf("position" to "not a position")).position)
+        assertNull(Todo.fromMap("id", emptyMap()).position)
     }
 }

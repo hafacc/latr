@@ -3,6 +3,7 @@ package cc.hafa.latr.ui
 import cc.hafa.latr.data.Todo
 import cc.hafa.latr.data.TodoState
 import cc.hafa.latr.util.LocalDateTimeUtil
+import cc.hafa.latr.util.Position
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -19,6 +20,7 @@ class TodoFilterTest {
         modifiedAt: Long = 0L,
         snoozeUntil: String? = null,
         pinned: Boolean = false,
+        position: String? = null,
     ): Todo = Todo(
         id = id,
         text = text,
@@ -26,6 +28,7 @@ class TodoFilterTest {
         modifiedAt = modifiedAt,
         snoozeUntil = snoozeUntil,
         pinned = pinned,
+        position = position,
     )
 
     private fun iso(epoch: Long): String = LocalDateTimeUtil.fromEpochMillis(epoch)
@@ -209,5 +212,35 @@ class TodoFilterTest {
     @Test
     fun `TAB_ORDER and DEFAULT_TAB stay in sync`() {
         assertEquals(StatusFilter.ACTIVE, TAB_ORDER[DEFAULT_TAB])
+    }
+
+    @Test
+    fun `a moved row orders by its position, not its modify time`() {
+        val top = todo(id = "top", modifiedAt = 300)
+        val bottom = todo(id = "bottom", modifiedAt = 100)
+        val moved = todo(id = "moved", modifiedAt = 900, position = Position.timeKey(200) + "movedz")
+        assertEquals(listOf("top", "moved", "bottom"), listOf(moved, bottom, top).sorted(StatusFilter.ACTIVE))
+        assertEquals(listOf("top", "moved", "bottom"), listOf(moved, bottom, top).sorted(StatusFilter.ALL))
+    }
+
+    @Test
+    fun `ACTIVE keeps an unsnoozed row at its unsnooze time whatever its position`() {
+        val woke = todo(id = "woke", snoozeUntil = iso(5_000L), position = Position.timeKey(10) + "wokez")
+        val plain = todo(id = "plain", modifiedAt = 1_000L)
+        assertEquals(listOf("woke", "plain"), listOf(plain, woke).sorted(StatusFilter.ACTIVE))
+        assertEquals(listOf("plain", "woke"), listOf(plain, woke).sorted(StatusFilter.ALL))
+    }
+
+    @Test
+    fun `SNOOZED orders rows snoozed to one time by position, then modify time`() {
+        val sameTime = iso(now + 5_000)
+        val older = todo(id = "older", modifiedAt = 100, snoozeUntil = sameTime)
+        val newer = todo(id = "newer", modifiedAt = 200, snoozeUntil = sameTime)
+        val moved = todo(id = "moved", modifiedAt = 50, snoozeUntil = sameTime, position = Position.timeKey(150) + "movedz")
+        val sooner = todo(id = "sooner", snoozeUntil = iso(now + 1_000))
+        assertEquals(
+            listOf("sooner", "newer", "moved", "older"),
+            listOf(older, moved, sooner, newer).sorted(StatusFilter.SNOOZED),
+        )
     }
 }

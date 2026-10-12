@@ -1,5 +1,6 @@
 import { Timestamp } from "firebase/firestore";
 import { plainText } from "./inline-style";
+import { idKey, readPosition, timeKey } from "./position";
 
 export type TodoState = "ACTIVE" | "DONE";
 
@@ -12,6 +13,8 @@ export type Todo = {
   serverModifiedAt: Timestamp | null;
   snoozeUntil: string | null;
   pinned: boolean;
+  /** Where a move put the row; null orders it by its time. */
+  position: string | null;
   deleted: boolean;
 };
 
@@ -29,6 +32,7 @@ export function newTodo(text = ""): Todo {
     serverModifiedAt: null,
     snoozeUntil: null,
     pinned: false,
+    position: null,
     deleted: false,
   };
 }
@@ -41,6 +45,7 @@ export function toFirestoreFields(t: Todo): Record<string, unknown> {
     state: t.state,
     snoozeUntil: t.snoozeUntil,
     pinned: t.pinned,
+    position: t.position,
     deleted: t.deleted,
   };
 }
@@ -68,6 +73,7 @@ export function fromFirestore(id: string, data: Record<string, unknown>): Todo {
     serverModifiedAt: readServerTimestamp(data.serverModifiedAt),
     snoozeUntil: typeof data.snoozeUntil === "string" ? data.snoozeUntil : null,
     pinned: data.pinned === true,
+    position: readPosition(data.position),
     deleted: data.deleted === true,
   };
 }
@@ -109,47 +115,54 @@ export function matchesFilter(t: Todo, filter: Filter, now: number): boolean {
   }
 }
 
-export function activeSortKey(t: Todo): number {
-  return t.snoozeUntil ? isoToEpoch(t.snoozeUntil) : t.modifiedAt;
+/** A row's own place: where a move put it, else its modify time. */
+export function ownKey(t: Todo): string {
+  return t.position ?? timeKey(t.modifiedAt) + idKey(t.id);
+}
+
+/** A row's place in Active: an unsnoozed row sits at its unsnooze time. */
+export function activeKey(t: Todo): string {
+  if (t.snoozeUntil) return timeKey(isoToEpoch(t.snoozeUntil)) + ownKey(t);
+  else return ownKey(t);
+}
+
+/** The key a filter's list orders by, newest first (Snoozed orders by snooze time before it). */
+export function listKey(t: Todo, filter: Filter): string {
+  return filter === "ACTIVE" ? activeKey(t) : ownKey(t);
 }
 
 /** Flips `pinned`; only an active row also drops its was-snoozed marker. */
 export function withPinToggled(t: Todo, now: number): Todo {
   const pinned = !t.pinned;
   if (!matchesFilter(t, "ACTIVE", now)) {
-    return { ...t, pinned, modifiedAt: now };
+    return { ...t, pinned, position: null, modifiedAt: now };
   } else {
-    return { ...t, pinned, snoozeUntil: null, modifiedAt: now };
+    return { ...t, pinned, position: null, snoozeUntil: null, modifiedAt: now };
   }
 }
 
+function compareText(a: string, b: string): number {
+  if (a < b) return -1;
+  else if (a > b) return 1;
+  else return 0;
+}
+
 export function sortForFilter(todos: readonly Todo[], filter: Filter): Todo[] {
-  const copy = todos.slice();
-  switch (filter) {
-    case "SNOOZED":
-      copy.sort((a, b) => {
-        const ax = a.snoozeUntil ? isoToEpoch(a.snoozeUntil) : 0;
-        const bx = b.snoozeUntil ? isoToEpoch(b.snoozeUntil) : 0;
-        if (ax !== bx) return ax - bx;
-        return a.id.localeCompare(b.id);
-      });
-      return copy;
-    case "ACTIVE":
-      copy.sort((a, b) => {
-        const bx = activeSortKey(b);
-        const ax = activeSortKey(a);
-        if (bx !== ax) return bx - ax;
-        return a.id.localeCompare(b.id);
-      });
-      return copy;
-    case "DONE":
-    case "ALL":
-      copy.sort((a, b) => {
-        if (b.modifiedAt !== a.modifiedAt) return b.modifiedAt - a.modifiedAt;
-        return a.id.localeCompare(b.id);
-      });
-      return copy;
-  }
+  const keyed = todos.map((todo) => ({
+    todo,
+    key: listKey(todo, filter),
+    snoozeAt:
+      filter === "SNOOZED" && todo.snoozeUntil
+        ? isoToEpoch(todo.snoozeUntil)
+        : 0,
+  }));
+  keyed.sort(
+    (a, b) =>
+      a.snoozeAt - b.snoozeAt ||
+      compareText(b.key, a.key) ||
+      compareText(a.todo.id, b.todo.id),
+  );
+  return keyed.map((entry) => entry.todo);
 }
 
 export function rankBySearch(todos: readonly Todo[], query: string): Todo[] {
