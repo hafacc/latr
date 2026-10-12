@@ -8,8 +8,7 @@
     "dev": "vite dev",
     "export": "vite build && bun scripts/build-sw.ts",
     "fmt": "biome format --write",
-    "lint": "svelte-kit sync && svelte-check --fail-on-warnings && biome check",
-    "test": "bun test"
+    "lint": "svelte-kit sync && svelte-check --fail-on-warnings && biome check"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
