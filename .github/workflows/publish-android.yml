@@ -1,6 +1,6 @@
-# Publish a tagged Android release: upload the signed bundle to Play's internal testing track as
-# a draft and create the GitHub release. Started by cut-android.yml; run it by hand to retry a
-# tag. Roll the draft out and promote it in the Play Console.
+# Publish a tagged Android release: upload the signed bundle to Play's internal testing track,
+# rolled out to testers, and create the GitHub release. Started by cut-android.yml; run it by hand
+# to retry a tag. Promote it in the Play Console.
 name: publish android
 
 on:
@@ -46,12 +46,19 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: >-
-          ./gradlew :app:publishReleaseBundle --release-status draft
-          "-Platr.storeFile=$RUNNER_TEMP/upload.jks"
-          "-Platr.storePassword=$STORE_PASSWORD"
-          "-Platr.keyAlias=$KEY_ALIAS"
-          "-Platr.keyPassword=$KEY_PASSWORD"
+        # Play refuses a rolled-out release while the app has never passed review; a draft is rolled out by hand.
+        run: |
+          publish() {
+            ./gradlew :app:publishReleaseBundle --release-status "$1" \
+              "-Platr.storeFile=$RUNNER_TEMP/upload.jks" \
+              "-Platr.storePassword=$STORE_PASSWORD" \
+              "-Platr.keyAlias=$KEY_ALIAS" \
+              "-Platr.keyPassword=$KEY_PASSWORD"
+          }
+          if ! publish completed; then
+            echo "::warning::Play refused a rolled-out release; uploading a draft to roll out by hand."
+            publish draft
+          fi
       # A release made with this token doesn't fire the web deploy's on:release.
       - name: Create GitHub release
         env:
