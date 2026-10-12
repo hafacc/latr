@@ -50,7 +50,10 @@ export function focusSearch(): void {
       value={search}
       oninput={(e) => onSearch(e.currentTarget.value)}
       onkeydown={(e) => {
-        if (e.key === "Escape") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          onSearch("");
+          e.currentTarget.blur();
+        }
       }}
       placeholder="Search"
       aria-label="Search todos"

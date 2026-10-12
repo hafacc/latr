@@ -41,10 +41,11 @@ $effect(() => {
     if (e.key === "Escape") onClose();
   }
   document.addEventListener("mousedown", onDocClick);
-  document.addEventListener("keydown", onKey);
+  // Capture: the popover stops its own keys from reaching the page.
+  document.addEventListener("keydown", onKey, true);
   return () => {
     document.removeEventListener("mousedown", onDocClick);
-    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onKey, true);
   };
 });
 </script>
