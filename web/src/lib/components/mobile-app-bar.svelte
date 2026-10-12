@@ -48,6 +48,12 @@ const open = $derived(searching || search.length > 0);
       type="search"
       value={search}
       oninput={(e) => onSearch(e.currentTarget.value)}
+      onkeydown={(e) => {
+        if (e.key === "Escape") {
+          onSearch("");
+          onSearching(false);
+        }
+      }}
       placeholder="Search"
       aria-label="Search todos"
       class="flex-1 min-w-0 h-10 px-3 rounded-[10px] bg-surface-muted outline-none text-[16px] text-text placeholder:text-text-secondary"
