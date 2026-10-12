@@ -100,8 +100,9 @@ class TodoViewModel(
 
     fun updateTodo(todo: Todo, touchModifiedAt: Boolean = true) {
         viewModelScope.launch {
+            // A change that sends the row to the top also drops where a move (made on web) had put it.
             val updated = if (touchModifiedAt) {
-                todo.copy(modifiedAt = System.currentTimeMillis())
+                todo.copy(modifiedAt = System.currentTimeMillis(), position = null)
             } else {
                 todo
             }

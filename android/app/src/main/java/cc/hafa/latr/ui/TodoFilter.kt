@@ -4,6 +4,8 @@ import cc.hafa.latr.data.Todo
 import cc.hafa.latr.data.TodoState
 import cc.hafa.latr.util.InlineStyle
 import cc.hafa.latr.util.LocalDateTimeUtil
+import cc.hafa.latr.util.Position
+import java.time.ZoneId
 
 enum class StatusFilter { ACTIVE, SNOOZED, DONE, ALL }
 
@@ -20,7 +22,18 @@ fun Todo.isSnoozed(nowMillis: Long): Boolean =
     state != TodoState.DONE &&
         snoozeUntil?.let { LocalDateTimeUtil.toEpochMillis(it) > nowMillis } == true
 
-/** Pure filter+sort+search; ACTIVE floats pinned then sorts by snooze/modified, others by time. A query re-ranks by word-boundary prefix matches. */
+/** A row's own place: where a move put it, else its modify time. */
+fun Todo.ownKey(): String = position ?: (Position.timeKey(modifiedAt) + Position.idKey(id))
+
+/** A row's place in Active: an unsnoozed row sits at its unsnooze time. */
+fun Todo.activeKey(zone: ZoneId = ZoneId.systemDefault()): String =
+    snoozeUntil?.let { Position.timeKey(LocalDateTimeUtil.toEpochMillis(it, zone)) + ownKey() } ?: ownKey()
+
+/** The key a filter's list orders by, newest first (Snoozed orders by snooze time before it). */
+fun Todo.listKey(filter: StatusFilter, zone: ZoneId = ZoneId.systemDefault()): String =
+    if (filter == StatusFilter.ACTIVE) activeKey(zone) else ownKey()
+
+/** Pure filter+sort+search; ACTIVE floats pinned, SNOOZED goes by snooze time, then every list by [listKey] newest first. A query re-ranks by word-boundary prefix matches. */
 fun List<Todo>.filterAndSort(
     filter: StatusFilter,
     searchQuery: String,
@@ -36,28 +49,22 @@ fun List<Todo>.filterAndSort(
             StatusFilter.DONE -> todo.state == TodoState.DONE
         }
     }
+    .map { it to it.listKey(filter) }
     .sortedWith(
-        // Pinned floats to the top of ACTIVE only. The primary key is a
-        // constant `false` for every other filter, so `sortedWith` (stable)
-        // leaves their secondary ordering byte-for-byte unchanged.
-        compareByDescending<Todo> { filter == StatusFilter.ACTIVE && it.pinned }
-            .thenBy { todo ->
-                when (filter) {
-                    StatusFilter.ACTIVE -> -(
-                        todo.snoozeUntil?.let { LocalDateTimeUtil.toEpochMillis(it) }
-                            ?: todo.modifiedAt
-                    )
-
-                    StatusFilter.SNOOZED -> todo.snoozeUntil?.let {
-                        LocalDateTimeUtil.toEpochMillis(it)
-                    } ?: Long.MAX_VALUE
-
-                    else -> -todo.modifiedAt
+        // Pinned floats to the top of ACTIVE only.
+        compareByDescending<Pair<Todo, String>> { (todo, _) -> filter == StatusFilter.ACTIVE && todo.pinned }
+            .thenBy { (todo, _) ->
+                if (filter == StatusFilter.SNOOZED) {
+                    todo.snoozeUntil?.let { LocalDateTimeUtil.toEpochMillis(it) } ?: Long.MAX_VALUE
+                } else {
+                    0L
                 }
             }
-            // Final tie-break: id keeps equal-time rows from flip-flopping.
-            .thenBy { it.id }
+            .thenByDescending { (_, key) -> key }
+            // Final tie-break: id keeps equal rows from flip-flopping.
+            .thenBy { (todo, _) -> todo.id }
     )
+    .map { (todo, _) -> todo }
     .let { sorted ->
         if (searchQuery.isBlank()) {
             sorted

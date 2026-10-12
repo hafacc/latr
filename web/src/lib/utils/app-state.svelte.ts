@@ -150,6 +150,7 @@ export class AppState {
             ...existing,
             text,
             snoozeUntil: null,
+            position: null,
             modifiedAt: isoToEpoch(existing.snoozeUntil),
           }
         : { ...existing, text };
@@ -163,6 +164,7 @@ export class AppState {
       ...existing,
       state: "DONE",
       snoozeUntil: null,
+      position: null,
       modifiedAt: Date.now(),
     });
     this.#dispatch({ type: "setFocus", id: null });
@@ -180,6 +182,7 @@ export class AppState {
       ...existing,
       state: "ACTIVE",
       snoozeUntil: null,
+      position: null,
       modifiedAt: Date.now(),
     });
   };
@@ -202,6 +205,7 @@ export class AppState {
     void this.holder.getStore().update({
       ...existing,
       snoozeUntil: epochToIso(epoch),
+      position: null,
       modifiedAt: Date.now(),
     });
     const snoozeUndo = this.holder.snoozeStats.commit(
@@ -223,6 +227,18 @@ export class AppState {
     const existing = this.#find(id);
     if (!existing) return;
     void this.holder.getStore().update(withPinToggled(existing, Date.now()));
+  };
+
+  /** Saves a row as [planMove] left it. */
+  move = (moved: Todo): void => {
+    const existing = this.#find(moved.id);
+    if (!existing) return;
+    void this.holder.getStore().update(moved);
+    this.#dispatch({ type: "setFocus", id: null });
+    this.#dispatch({
+      type: "setUndo",
+      entry: { kind: "move", todos: [existing] },
+    });
   };
 
   remove = (id: string): void => {

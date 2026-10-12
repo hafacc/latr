@@ -1310,6 +1310,7 @@ fun TodoItem(
                                     currentTodo.copy(
                                         text = newValue.text,
                                         snoozeUntil = null,
+                                        position = null,
                                         modifiedAt = LocalDateTimeUtil.toEpochMillis(wasSnoozeUntil)
                                     )
                                 } else {
