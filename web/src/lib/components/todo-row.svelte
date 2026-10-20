@@ -134,10 +134,11 @@ const showPin = $derived(!isDone);
 const swipeSide = $derived<SwipeSide | null>(
   dx > 0 ? "start" : dx < 0 ? "end" : null,
 );
-const swipe = $derived(
-  swipeSide
-    ? SWIPE_STYLE[swipeAction(swipeSide, isDone, isActivelySnoozed)]
-    : null,
+const startSwipe = $derived(
+  SWIPE_STYLE[swipeAction("start", isDone, isActivelySnoozed)],
+);
+const endSwipe = $derived(
+  SWIPE_STYLE[swipeAction("end", isDone, isActivelySnoozed)],
 );
 const pastThreshold = $derived(
   swipeSide !== null && Math.abs(dx) >= commitThreshold(row?.offsetWidth ?? 0),
@@ -394,17 +395,31 @@ function closeSnooze() {
     </button>
   {/if}
 
-  {#if swipe}
+  {#if swipeSide}
+    <!-- The two halves meet under the middle of the row, so changing direction never shows a color change. -->
     <div
       aria-hidden="true"
+      style:right={`calc(50% - ${dx}px)`}
       class={[
-        "absolute inset-0 flex items-center gap-2 px-5 text-sm font-medium transition-colors",
-        pastThreshold ? swipe.strong : swipe.soft,
-        swipeSide === "start" ? "justify-start" : "justify-end",
+        "absolute inset-y-0 left-0 flex items-center gap-2 px-5 text-sm font-medium transition-colors",
+        pastThreshold && swipeSide === "start"
+          ? startSwipe.strong
+          : startSwipe.soft,
       ]}
     >
-      <swipe.icon class="w-5 h-5" />
-      {swipe.label}
+      <startSwipe.icon class="w-5 h-5" />
+      {startSwipe.label}
+    </div>
+    <div
+      aria-hidden="true"
+      style:left={`calc(50% + ${dx}px)`}
+      class={[
+        "absolute inset-y-0 right-0 flex items-center justify-end gap-2 px-5 text-sm font-medium transition-colors",
+        pastThreshold && swipeSide === "end" ? endSwipe.strong : endSwipe.soft,
+      ]}
+    >
+      <endSwipe.icon class="w-5 h-5" />
+      {endSwipe.label}
     </div>
   {/if}
 
