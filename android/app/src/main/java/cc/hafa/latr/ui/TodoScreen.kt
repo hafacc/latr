@@ -115,6 +115,8 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1157,61 +1159,70 @@ fun TodoItem(
             scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
         },
         backgroundContent = {
-            val direction = swipeDirection
-            if (direction != SwipeToDismissBoxValue.Settled) {
+            if (swipeDirection != SwipeToDismissBoxValue.Settled) {
                 val colorScheme = MaterialTheme.colorScheme
                 val done = todo.state == TodoState.DONE
-                val look = when (direction) {
-                    SwipeToDismissBoxValue.EndToStart ->
-                        if (done) {
-                            SwipeLook(
-                                colorScheme.errorContainer, colorScheme.onErrorContainer,
-                                colorScheme.error, colorScheme.onError, Icons.Rounded.Delete, "Delete",
-                            )
-                        } else {
-                            SwipeLook(
-                                colorScheme.primaryContainer, colorScheme.onPrimaryContainer,
-                                colorScheme.primary, colorScheme.onPrimary, Icons.Rounded.Check, "Done",
-                            )
-                        }
-
-                    else ->
-                        if (done || snoozed) {
-                            SwipeLook(
-                                colorScheme.secondaryContainer, colorScheme.onSecondaryContainer,
-                                colorScheme.secondary, colorScheme.onSecondary, Icons.Rounded.Restore, "Restore",
-                            )
-                        } else {
-                            SwipeLook(
-                                colorScheme.tertiaryContainer, colorScheme.onTertiaryContainer,
-                                colorScheme.tertiary, colorScheme.onTertiary, Icons.Rounded.Schedule, "Snooze",
-                            )
-                        }
+                val startLook = if (done || snoozed) {
+                    SwipeLook(
+                        colorScheme.secondaryContainer, colorScheme.onSecondaryContainer,
+                        colorScheme.secondary, colorScheme.onSecondary, Icons.Rounded.Restore, "Restore",
+                    )
+                } else {
+                    SwipeLook(
+                        colorScheme.tertiaryContainer, colorScheme.onTertiaryContainer,
+                        colorScheme.tertiary, colorScheme.onTertiary, Icons.Rounded.Schedule, "Snooze",
+                    )
                 }
-                val armed by remember { derivedStateOf { dismissState.targetValue != SwipeToDismissBoxValue.Settled } }
-                LaunchedEffect(armed) {
-                    if (armed) hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                val endLook = if (done) {
+                    SwipeLook(
+                        colorScheme.errorContainer, colorScheme.onErrorContainer,
+                        colorScheme.error, colorScheme.onError, Icons.Rounded.Delete, "Delete",
+                    )
+                } else {
+                    SwipeLook(
+                        colorScheme.primaryContainer, colorScheme.onPrimaryContainer,
+                        colorScheme.primary, colorScheme.onPrimary, Icons.Rounded.Check, "Done",
+                    )
                 }
-                val background by animateColorAsState(if (armed) look.armed else look.soft, label = "swipeFill")
-                val content by animateColorAsState(if (armed) look.onArmed else look.onSoft, label = "swipeInk")
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (direction == SwipeToDismissBoxValue.EndToStart) {
-                        Arrangement.spacedBy(8.dp, Alignment.End)
-                    } else {
-                        Arrangement.spacedBy(8.dp, Alignment.Start)
-                    },
+                val target by remember { derivedStateOf { dismissState.targetValue } }
+                LaunchedEffect(target != SwipeToDismissBoxValue.Settled) {
+                    if (target != SwipeToDismissBoxValue.Settled) {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    }
+                }
+                val startArmed = target == SwipeToDismissBoxValue.StartToEnd
+                val endArmed = target == SwipeToDismissBoxValue.EndToStart
+                val startFill by animateColorAsState(if (startArmed) startLook.armed else startLook.soft, label = "swipeStartFill")
+                val startInk by animateColorAsState(if (startArmed) startLook.onArmed else startLook.onSoft, label = "swipeStartInk")
+                val endFill by animateColorAsState(if (endArmed) endLook.armed else endLook.soft, label = "swipeEndFill")
+                val endInk by animateColorAsState(if (endArmed) endLook.onArmed else endLook.onSoft, label = "swipeEndInk")
+                // The two fills meet under the middle of the row, so changing direction never shows a color change.
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(background)
+                        .drawBehind {
+                            val offset = runCatching { dismissState.requireOffset() }.getOrDefault(0f)
+                            val split = (size.width / 2 + offset).coerceIn(0f, size.width)
+                            drawRect(startFill, size = Size(split, size.height))
+                            drawRect(endFill, topLeft = Offset(split, 0f), size = Size(size.width - split, size.height))
+                        }
                         .padding(horizontal = 24.dp)
                 ) {
-                    if (direction == SwipeToDismissBoxValue.EndToStart) {
-                        Text(look.label, color = content, style = MaterialTheme.typography.labelLarge)
-                        Icon(look.icon, contentDescription = null, tint = content)
-                    } else {
-                        Icon(look.icon, contentDescription = null, tint = content)
-                        Text(look.label, color = content, style = MaterialTheme.typography.labelLarge)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.align(Alignment.CenterStart),
+                    ) {
+                        Icon(startLook.icon, contentDescription = null, tint = startInk)
+                        Text(startLook.label, color = startInk, style = MaterialTheme.typography.labelLarge)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    ) {
+                        Text(endLook.label, color = endInk, style = MaterialTheme.typography.labelLarge)
+                        Icon(endLook.icon, contentDescription = null, tint = endInk)
                     }
                 }
             }
