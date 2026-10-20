@@ -4,6 +4,7 @@ import Search from "@lucide/svelte/icons/search";
 import X from "@lucide/svelte/icons/x";
 import ClearAllButton from "./clear-all-button.svelte";
 import SyncPill from "./sync-pill.svelte";
+import TagInput from "./tag-input.svelte";
 
 let {
   title,
@@ -19,10 +20,10 @@ let {
   onClearAll: (() => void) | null;
 } = $props();
 
-let input: HTMLInputElement;
+let input = $state<HTMLInputElement>();
 
 export function focusSearch(): void {
-  input.focus();
+  input?.focus();
 }
 </script>
 
@@ -41,11 +42,13 @@ export function focusSearch(): void {
     <ClearAllButton onClick={onClearAll} />
   {/if}
   <label
+    for="todo-search"
     class="group/search flex items-center gap-2 w-60 focus-within:w-72 h-8 px-2.5 rounded-[10px] bg-surface-muted focus-within:bg-surface focus-within:ring-1 focus-within:ring-accent text-text-secondary transition-all"
   >
     <Search class="w-[15px] h-[15px] shrink-0" aria-hidden="true" />
-    <input
-      bind:this={input}
+    <TagInput
+      bind:input
+      id="todo-search"
       type="search"
       value={search}
       oninput={(e) => onSearch(e.currentTarget.value)}
@@ -57,8 +60,9 @@ export function focusSearch(): void {
       }}
       placeholder="Search"
       aria-label="Search todos"
-      class="flex-1 min-w-0 bg-transparent outline-none text-[13px] text-text placeholder:text-text-secondary [&::-webkit-search-cancel-button]:hidden"
-    >
+      class="flex-1 min-w-0 self-stretch"
+      textClass="text-[13px]"
+    />
     {#if search}
       <button
         type="button"

@@ -1,4 +1,4 @@
-<!-- @component Renders `*bold*` / `_italic_` with the markers kept, dimmed. -->
+<!-- @component Renders `*bold*` / `_italic_` with the markers kept, dimmed, and `#tags` as chips. -->
 <script lang="ts">
 import { type StyledNode, styledTree } from "../utils/inline-style";
 
@@ -14,6 +14,8 @@ let { text }: { text: string } = $props();
       {node.text}
     {:else if node.kind === "marker"}
       <span class="md-marker">{node.text}</span>
+    {:else if node.kind === "tag"}
+      <span class="md-tag">{node.text}</span>
     {:else}
       <span class={node.style === "bold" ? "md-bold" : "md-italic"}
         >{@render render(node.children)}</span

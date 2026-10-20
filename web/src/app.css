@@ -139,6 +139,16 @@ body {
   color: var(--color-muted);
 }
 
+/* The shadow widens the chip without moving the text, so a row doesn't shift between rest and editing. */
+.md-tag {
+  color: var(--color-accent);
+  background-color: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 14%, transparent);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
 @keyframes undo-drain {
   from {
     transform: scaleX(1);

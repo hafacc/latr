@@ -10,9 +10,10 @@ import org.junit.Test
 
 class InlineStyleTextTest {
     private val base = Color.Black
+    private val tag = Color.Blue
 
-    private fun styles(text: String) =
-        styledTodoText(text, base).spanStyles.map { Triple(it.item, it.start, it.end) }
+    private fun styles(text: String, tagsOnly: Boolean = false) =
+        styledTodoText(text, base, tag, tagsOnly).spanStyles.map { Triple(it.item, it.start, it.end) }
 
     @Test
     fun `plain text carries no styles`() {
@@ -38,8 +39,18 @@ class InlineStyleTextTest {
     }
 
     @Test
+    fun `tags take the tag color`() {
+        assertEquals(listOf(Triple(SpanStyle(color = tag), 4, 9)), styles("buy #milk now"))
+    }
+
+    @Test
+    fun `tags only leaves bold and italic plain`() {
+        assertEquals(listOf(Triple(SpanStyle(color = tag), 4, 9)), styles("*a* #milk", tagsOnly = true))
+    }
+
+    @Test
     fun `the editor transformation keeps text and offsets unchanged`() {
-        val transformed = InlineStyleTransformation(base)
+        val transformed = InlineStyleTransformation(base, tag)
             .filter(androidx.compose.ui.text.AnnotatedString("a *b* c"))
         assertEquals("a *b* c", transformed.text.text)
         assertEquals(3, transformed.offsetMapping.originalToTransformed(3))
