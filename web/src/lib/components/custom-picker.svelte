@@ -3,6 +3,7 @@ import ArrowLeft from "@lucide/svelte/icons/arrow-left";
 import ChevronLeft from "@lucide/svelte/icons/chevron-left";
 import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import Clock from "@lucide/svelte/icons/clock";
+import { flushSync } from "svelte";
 import { getAppState } from "../utils/app-state.svelte";
 import {
   formatClockMinutes,
@@ -14,6 +15,7 @@ import {
   toYmd,
   WEEKDAY_SHORT,
 } from "../utils/calendar";
+import { desktop } from "../utils/media.svelte";
 import {
   type QuickTime,
   quickTimeEpoch,
@@ -59,6 +61,9 @@ let view = $state({
   month: initialDate.getMonth(),
 });
 let customTime = $state(initial.time);
+// Phones pick a time on a step of its own, like Android; the date step shows only the quick times.
+let timeStep = $state(false);
+let timeInput = $state<HTMLInputElement>();
 
 const today = $derived(new Date(app.now));
 const grid = $derived(monthGrid(view.year, view.month, today));
@@ -78,94 +83,28 @@ function shiftMonth(delta: number) {
   view = { year: date.getFullYear(), month: date.getMonth() };
 }
 
+function openTimeStep() {
+  // Synchronous so the focus lands inside the tap, which iOS needs to raise the keyboard.
+  flushSync(() => {
+    timeStep = true;
+  });
+  timeInput?.focus();
+}
+
 function pick(epoch: number | null) {
   if (epoch === null || epoch <= Date.now()) app.refreshNow();
   else onPick(epoch, "custom");
 }
 </script>
 
-<div class="flex flex-col gap-3 p-3">
-  <div class="flex items-center gap-1.5">
-    <button type="button" onclick={onBack} aria-label="Back" class={navButton}>
-      <ArrowLeft class="w-4 h-4" />
-    </button>
-    <span class="flex-1 text-sm font-semibold">
-      {monthLabel(view.year, view.month)}
-    </span>
-    <button
-      type="button"
-      onclick={() => shiftMonth(-1)}
-      disabled={atCurrentMonth}
-      aria-label="Previous month"
-      class={navButton}
-    >
-      <ChevronLeft class="w-4 h-4" />
-    </button>
-    <button
-      type="button"
-      onclick={() => shiftMonth(1)}
-      aria-label="Next month"
-      class={navButton}
-    >
-      <ChevronRight class="w-4 h-4" />
-    </button>
-  </div>
-
-  <div class="grid grid-cols-7 gap-0.5 text-center">
-    {#each WEEKDAY_SHORT as weekday (weekday)}
-      <span class="text-[11.5px] font-medium text-text-secondary py-1">
-        {weekday}
-      </span>
-    {/each}
-    {#each grid as cell (cell.ymd)}
-      {@const isSelected = cell.ymd === selected}
-      <button
-        type="button"
-        disabled={cell.past}
-        onclick={() => {
-          selected = cell.ymd;
-        }}
-        aria-pressed={isSelected}
-        aria-label={parseYmd(cell.ymd).toDateString()}
-        class={[
-          "h-[34px] max-md:h-10 rounded-[10px] text-[13px] tabular-nums transition-colors",
-          isSelected
-            ? "bg-accent text-on-accent font-semibold"
-            : cell.past
-              ? "text-muted"
-              : cell.inMonth
-                ? "text-text hover:bg-surface-hover"
-                : "text-text-secondary hover:bg-surface-hover",
-          cell.today && !isSelected && "ring-1 ring-inset ring-accent",
-        ]}
-      >
-        {cell.day}
-      </button>
-    {/each}
-  </div>
-
-  {#if app.snoozeQuickTimes.length > 0}
-    <div class="flex gap-1.5">
-      {#each app.snoozeQuickTimes as quick (quick.clockMinutes)}
-        {@const epoch = quickTimeEpoch(selected, quick.clockMinutes)}
-        <button
-          type="button"
-          disabled={epoch === null || epoch <= app.now}
-          onclick={() => pick(epoch)}
-          class="flex-1 h-8 max-md:h-10 rounded-full bg-accent-soft text-accent-strong text-[13px] font-medium tabular-nums hover:opacity-90 transition-opacity disabled:bg-surface-muted disabled:text-muted"
-        >
-          {formatClockMinutes(quick.clockMinutes)}
-        </button>
-      {/each}
-    </div>
-  {/if}
-
+{#snippet timeField()}
   <div class="flex gap-2">
     <label
       class="flex-1 min-w-0 flex items-center gap-2 h-8 max-md:h-10 px-2.5 rounded-[10px] bg-surface-muted text-text-secondary focus-within:ring-1 focus-within:ring-accent"
     >
       <Clock class="w-4 h-4 shrink-0" aria-hidden="true" />
       <input
+        bind:this={timeInput}
         type="text"
         inputmode="numeric"
         bind:value={customTime}
@@ -190,4 +129,118 @@ function pick(epoch: number | null) {
       Snooze
     </button>
   </div>
-</div>
+{/snippet}
+
+{#if timeStep}
+  <div class="flex flex-col gap-3 p-3">
+    <div class="flex items-center gap-1.5">
+      <button
+        type="button"
+        onclick={() => {
+          timeStep = false;
+        }}
+        aria-label="Back"
+        class={navButton}
+      >
+        <ArrowLeft class="w-4 h-4" />
+      </button>
+      <span class="flex-1 text-sm font-semibold">Pick a time</span>
+    </div>
+    {@render timeField()}
+  </div>
+{:else}
+  <div class="flex flex-col gap-3 p-3">
+    <div class="flex items-center gap-1.5">
+      <button
+        type="button"
+        onclick={onBack}
+        aria-label="Back"
+        class={navButton}
+      >
+        <ArrowLeft class="w-4 h-4" />
+      </button>
+      <span class="flex-1 text-sm font-semibold">
+        {monthLabel(view.year, view.month)}
+      </span>
+      <button
+        type="button"
+        onclick={() => shiftMonth(-1)}
+        disabled={atCurrentMonth}
+        aria-label="Previous month"
+        class={navButton}
+      >
+        <ChevronLeft class="w-4 h-4" />
+      </button>
+      <button
+        type="button"
+        onclick={() => shiftMonth(1)}
+        aria-label="Next month"
+        class={navButton}
+      >
+        <ChevronRight class="w-4 h-4" />
+      </button>
+    </div>
+
+    <div class="grid grid-cols-7 gap-0.5 text-center">
+      {#each WEEKDAY_SHORT as weekday (weekday)}
+        <span class="text-[11.5px] font-medium text-text-secondary py-1">
+          {weekday}
+        </span>
+      {/each}
+      {#each grid as cell (cell.ymd)}
+        {@const isSelected = cell.ymd === selected}
+        <button
+          type="button"
+          disabled={cell.past}
+          onclick={() => {
+            selected = cell.ymd;
+          }}
+          aria-pressed={isSelected}
+          aria-label={parseYmd(cell.ymd).toDateString()}
+          class={[
+            "h-[34px] max-md:h-10 rounded-[10px] text-[13px] tabular-nums transition-colors",
+            isSelected
+              ? "bg-accent text-on-accent font-semibold"
+              : cell.past
+                ? "text-muted"
+                : cell.inMonth
+                  ? "text-text hover:bg-surface-hover"
+                  : "text-text-secondary hover:bg-surface-hover",
+            cell.today && !isSelected && "ring-1 ring-inset ring-accent",
+          ]}
+        >
+          {cell.day}
+        </button>
+      {/each}
+    </div>
+
+    {#if app.snoozeQuickTimes.length > 0 || !desktop.current}
+      <div class="flex items-center gap-1.5">
+        {#each app.snoozeQuickTimes as quick (quick.clockMinutes)}
+          {@const epoch = quickTimeEpoch(selected, quick.clockMinutes)}
+          <button
+            type="button"
+            disabled={epoch === null || epoch <= app.now}
+            onclick={() => pick(epoch)}
+            class="flex-1 min-w-0 h-8 max-md:h-10 rounded-full bg-accent-soft text-accent-strong text-[13px] font-medium tabular-nums hover:opacity-90 transition-opacity disabled:bg-surface-muted disabled:text-muted"
+          >
+            {formatClockMinutes(quick.clockMinutes)}
+          </button>
+        {/each}
+        {#if !desktop.current}
+          <button
+            type="button"
+            onclick={openTimeStep}
+            class="shrink-0 h-10 px-2 ml-auto rounded-[10px] text-accent text-[15px] font-medium hover:bg-surface-hover"
+          >
+            Other time
+          </button>
+        {/if}
+      </div>
+    {/if}
+
+    {#if desktop.current}
+      {@render timeField()}
+    {/if}
+  </div>
+{/if}
