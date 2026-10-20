@@ -12,6 +12,8 @@ class RoomTodoStore(private val dao: TodoDao) : TodoStore {
 
     override suspend fun update(todo: Todo) = dao.update(todo)
 
+    override suspend fun writeAll(todos: List<Todo>) = dao.upsertAll(todos)
+
     override suspend fun delete(todo: Todo) = tombstone(todo)
 
     override suspend fun clearAllDone(done: List<Todo>) {

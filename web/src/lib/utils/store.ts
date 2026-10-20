@@ -10,7 +10,26 @@ export type UndoEntry = {
   todos: Todo[];
   // Only set for "snooze": the learned-suggestion credit this pick added, so undo can retract it.
   snoozeUndo?: SnoozeUndo;
+  // Only set for "complete" of a repeating todo: the next copy it made, which undo deletes.
+  spawned?: Todo;
 };
+
+/** What undoing `entry` writes: rows saved back as they were, copies deleted, deleted rows re-inserted. */
+export function undoWrites(entry: UndoEntry): {
+  put: Todo[];
+  remove: Todo[];
+  restore: Todo[];
+} {
+  if (entry.kind === "delete") {
+    return { put: [], remove: [], restore: entry.todos };
+  } else {
+    return {
+      put: entry.todos,
+      remove: entry.spawned ? [entry.spawned] : [],
+      restore: [],
+    };
+  }
+}
 
 export type UiState = {
   filter: Filter;

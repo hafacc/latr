@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { initialUi, uiReducer } from "./store";
+import { initialUi, uiReducer, undoWrites } from "./store";
 import type { Todo } from "./todo";
 
 function todo(id: string): Todo {
@@ -14,6 +14,9 @@ function todo(id: string): Todo {
     pinned: false,
     position: null,
     deleted: false,
+    repeat: null,
+    repeatSpawned: false,
+    occurrence: null,
   };
 }
 
@@ -80,5 +83,33 @@ describe("uiReducer", () => {
     const next = uiReducer(primed, { type: "clearUndo" });
     expect(next.lastUndo).toBeNull();
     expect(next.undoExpiresAt).toBeNull();
+  });
+});
+
+describe("undoWrites", () => {
+  test("undoing a repeating complete restores the todo and deletes its copy", () => {
+    const prior = todo("a");
+    const copy = todo("b");
+    expect(
+      undoWrites({ kind: "complete", todos: [prior], spawned: copy }),
+    ).toEqual({ put: [prior], remove: [copy], restore: [] });
+  });
+
+  test("a plain complete only restores", () => {
+    const prior = todo("a");
+    expect(undoWrites({ kind: "complete", todos: [prior] })).toEqual({
+      put: [prior],
+      remove: [],
+      restore: [],
+    });
+  });
+
+  test("a delete re-inserts", () => {
+    const gone = todo("a");
+    expect(undoWrites({ kind: "delete", todos: [gone] })).toEqual({
+      put: [],
+      remove: [],
+      restore: [gone],
+    });
   });
 });

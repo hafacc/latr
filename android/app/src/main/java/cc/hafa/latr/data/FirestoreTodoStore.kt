@@ -76,6 +76,13 @@ class FirestoreTodoStore(
             .addOnFailureListener { Log.w(TAG, "update failed", it) }
     }
 
+    override suspend fun writeAll(todos: List<Todo>) {
+        if (todos.isEmpty()) return
+        val batch = firestore.batch()
+        for (t in todos) batch.set(collection.document(t.id), t.toMap(), SetOptions.merge())
+        batch.commit().addOnFailureListener { Log.w(TAG, "writeAll failed", it) }
+    }
+
     override suspend fun delete(todo: Todo) {
         collection.document(todo.id).set(tombstone(), SetOptions.merge())
             .addOnFailureListener { Log.w(TAG, "delete failed", it) }

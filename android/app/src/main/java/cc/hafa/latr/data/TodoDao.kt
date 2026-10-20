@@ -28,6 +28,9 @@ interface TodoDao {
     @Upsert
     suspend fun upsert(todo: Todo)
 
+    @Upsert
+    suspend fun upsertAll(todos: List<Todo>)
+
     @Update
     suspend fun update(todo: Todo)
 

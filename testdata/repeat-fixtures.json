@@ -1,0 +1,52 @@
+{
+  "_doc": {
+    "repeat": "{every: 1..7, unit: day|week|month, weekday: ISO weekday 1..7 (Monday=1, used by week), monthDay: 1..31 or -1 for the last day (used by month; a day past the month's end lands on its last day), at: HH:MM, anchor: YYYY-MM-DD}",
+    "next": "The first occurrence strictly after `after` (local date-time, no zone). Every N days counts days from the anchor; every N weeks counts Monday-start weeks from the anchor's week; every N months counts months from the anchor's month.",
+    "anchor": "The anchor a rule saved at `now` gets: the date of its first occurrence after `now`, counting as if every were 1.",
+    "text": "The repeating row's second line."
+  },
+  "next": [
+    { "name": "weekly, later the same day", "repeat": { "every": 1, "unit": "week", "weekday": 1, "monthDay": 19, "at": "07:00", "anchor": "2026-10-19" }, "after": "2026-10-19T08:00:00", "next": "2026-10-26T07:00:00" },
+    { "name": "weekly, earlier the same day", "repeat": { "every": 1, "unit": "week", "weekday": 1, "monthDay": 19, "at": "07:00", "anchor": "2026-10-19" }, "after": "2026-10-19T06:00:00", "next": "2026-10-19T07:00:00" },
+    { "name": "exactly at the time is past it", "repeat": { "every": 1, "unit": "week", "weekday": 1, "monthDay": 19, "at": "07:00", "anchor": "2026-10-19" }, "after": "2026-10-19T07:00:00", "next": "2026-10-26T07:00:00" },
+    { "name": "every 2 weeks skips the odd week", "repeat": { "every": 2, "unit": "week", "weekday": 1, "monthDay": 19, "at": "07:00", "anchor": "2026-10-19" }, "after": "2026-10-19T08:00:00", "next": "2026-11-02T07:00:00" },
+    { "name": "every 2 weeks, later in the anchor week", "repeat": { "every": 2, "unit": "week", "weekday": 4, "monthDay": 19, "at": "07:00", "anchor": "2026-10-22" }, "after": "2026-10-19T08:00:00", "next": "2026-10-22T07:00:00" },
+    { "name": "every 2 weeks, anchor midweek counts its Monday-start week", "repeat": { "every": 2, "unit": "week", "weekday": 1, "monthDay": 21, "at": "07:00", "anchor": "2026-10-21" }, "after": "2026-10-21T08:00:00", "next": "2026-11-02T07:00:00" },
+    { "name": "a late finish skips missed dates", "repeat": { "every": 1, "unit": "week", "weekday": 1, "monthDay": 19, "at": "07:00", "anchor": "2026-10-19" }, "after": "2026-11-04T12:00:00", "next": "2026-11-09T07:00:00" },
+    { "name": "every 3 days", "repeat": { "every": 3, "unit": "day", "weekday": 1, "monthDay": 19, "at": "09:00", "anchor": "2026-10-19" }, "after": "2026-10-19T10:00:00", "next": "2026-10-22T09:00:00" },
+    { "name": "every day", "repeat": { "every": 1, "unit": "day", "weekday": 1, "monthDay": 19, "at": "21:30", "anchor": "2026-10-19" }, "after": "2026-10-19T22:00:00", "next": "2026-10-20T21:30:00" },
+    { "name": "the 31st in a 30-day month is its last day", "repeat": { "every": 1, "unit": "month", "weekday": 1, "monthDay": 31, "at": "09:00", "anchor": "2026-10-31" }, "after": "2026-10-31T10:00:00", "next": "2026-11-30T09:00:00" },
+    { "name": "last day of February", "repeat": { "every": 1, "unit": "month", "weekday": 1, "monthDay": -1, "at": "09:00", "anchor": "2027-01-31" }, "after": "2027-01-31T10:00:00", "next": "2027-02-28T09:00:00" },
+    { "name": "the 29th in a leap February", "repeat": { "every": 1, "unit": "month", "weekday": 1, "monthDay": 29, "at": "09:00", "anchor": "2028-01-29" }, "after": "2028-01-29T10:00:00", "next": "2028-02-29T09:00:00" },
+    { "name": "every 2 months", "repeat": { "every": 2, "unit": "month", "weekday": 1, "monthDay": 15, "at": "09:00", "anchor": "2026-10-15" }, "after": "2026-10-15T10:00:00", "next": "2026-12-15T09:00:00" },
+    { "name": "every 2 months across a year", "repeat": { "every": 2, "unit": "month", "weekday": 1, "monthDay": 15, "at": "09:00", "anchor": "2026-11-15" }, "after": "2026-11-15T10:00:00", "next": "2027-01-15T09:00:00" }
+  ],
+  "anchor": [
+    { "name": "every 2 weeks starts at the next matching day", "repeat": { "every": 2, "unit": "week", "weekday": 1, "monthDay": 1, "at": "07:00" }, "now": "2026-10-21T10:00:00", "anchor": "2026-10-26" },
+    { "name": "daily after today's time is tomorrow", "repeat": { "every": 3, "unit": "day", "weekday": 1, "monthDay": 1, "at": "09:00" }, "now": "2026-10-19T10:00:00", "anchor": "2026-10-20" },
+    { "name": "daily before today's time is today", "repeat": { "every": 3, "unit": "day", "weekday": 1, "monthDay": 1, "at": "09:00" }, "now": "2026-10-19T08:00:00", "anchor": "2026-10-19" },
+    { "name": "monthly", "repeat": { "every": 2, "unit": "month", "weekday": 1, "monthDay": 15, "at": "09:00" }, "now": "2026-10-19T10:00:00", "anchor": "2026-11-15" }
+  ],
+  "text": [
+    { "repeat": { "every": 1, "unit": "day", "weekday": 1, "monthDay": 1, "at": "09:00", "anchor": "2026-10-19" }, "text": "Repeats every day at 09:00" },
+    { "repeat": { "every": 3, "unit": "day", "weekday": 1, "monthDay": 1, "at": "09:00", "anchor": "2026-10-19" }, "text": "Repeats every 3 days at 09:00" },
+    { "repeat": { "every": 1, "unit": "week", "weekday": 1, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "text": "Repeats every Monday at 07:00" },
+    { "repeat": { "every": 1, "unit": "week", "weekday": 7, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "text": "Repeats every Sunday at 07:00" },
+    { "repeat": { "every": 2, "unit": "week", "weekday": 2, "monthDay": 1, "at": "08:00", "anchor": "2026-10-19" }, "text": "Repeats every 2 weeks on Tuesday at 08:00" },
+    { "repeat": { "every": 1, "unit": "month", "weekday": 1, "monthDay": 1, "at": "09:00", "anchor": "2026-10-19" }, "text": "Repeats every month on the 1st at 09:00" },
+    { "repeat": { "every": 2, "unit": "month", "weekday": 1, "monthDay": 22, "at": "09:00", "anchor": "2026-10-19" }, "text": "Repeats every 2 months on the 22nd at 09:00" },
+    { "repeat": { "every": 1, "unit": "month", "weekday": 1, "monthDay": -1, "at": "18:00", "anchor": "2026-10-19" }, "text": "Repeats every month on the last day at 18:00" },
+    { "repeat": { "every": 1, "unit": "month", "weekday": 1, "monthDay": 13, "at": "09:00", "anchor": "2026-10-19" }, "text": "Repeats every month on the 13th at 09:00" }
+  ],
+  "read": [
+    { "name": "valid", "in": { "every": 1, "unit": "week", "weekday": 4, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "out": { "every": 1, "unit": "week", "weekday": 4, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" } },
+    { "name": "missing", "in": null, "out": null },
+    { "name": "every out of range", "in": { "every": 8, "unit": "week", "weekday": 1, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "out": null },
+    { "name": "unknown unit", "in": { "every": 1, "unit": "year", "weekday": 1, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "out": null },
+    { "name": "no weekday", "in": { "every": 1, "unit": "week", "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "out": null },
+    { "name": "bad weekday", "in": { "every": 1, "unit": "week", "weekday": 0, "monthDay": 1, "at": "07:00", "anchor": "2026-10-19" }, "out": null },
+    { "name": "bad month day", "in": { "every": 1, "unit": "month", "weekday": 1, "monthDay": 0, "at": "07:00", "anchor": "2026-10-19" }, "out": null },
+    { "name": "bad time", "in": { "every": 1, "unit": "day", "weekday": 1, "monthDay": 1, "at": "24:00", "anchor": "2026-10-19" }, "out": null },
+    { "name": "bad anchor", "in": { "every": 1, "unit": "day", "weekday": 1, "monthDay": 1, "at": "07:00", "anchor": "2026-13-01" }, "out": null }
+  ]
+}

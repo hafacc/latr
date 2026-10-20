@@ -5,6 +5,7 @@ import androidx.room.PrimaryKey
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import cc.hafa.latr.util.Position
+import cc.hafa.latr.util.Repeat
 import java.util.UUID
 
 enum class TodoState { ACTIVE, DONE }
@@ -23,6 +24,12 @@ data class Todo(
     /** Where a move put the row; null orders it by its time. */
     val position: String? = null,
     val deleted: Boolean = false,
+    /** How often the todo comes back once done; null for a one-off. */
+    val repeat: Repeat? = null,
+    /** Whether marking this todo done has already made its next copy. */
+    val repeatSpawned: Boolean = false,
+    /** The scheduled local time this copy of a repeating todo stands for. */
+    val occurrence: String? = null,
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         "text" to text,
@@ -34,6 +41,9 @@ data class Todo(
         "pinned" to pinned,
         "position" to position,
         "deleted" to deleted,
+        "repeat" to repeat?.toMap(),
+        "repeatSpawned" to repeatSpawned,
+        "occurrence" to occurrence,
     )
 
     companion object {
@@ -54,6 +64,9 @@ data class Todo(
                 pinned = data["pinned"] as? Boolean ?: false,
                 position = Position.readPosition(data["position"]),
                 deleted = data["deleted"] as? Boolean ?: false,
+                repeat = Repeat.read(data["repeat"]),
+                repeatSpawned = data["repeatSpawned"] as? Boolean ?: false,
+                occurrence = data["occurrence"] as? String,
             )
         }
     }

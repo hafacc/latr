@@ -1,4 +1,5 @@
 import { createContext } from "svelte";
+import type { RepeatDraft } from "./repeat";
 import type { DevicePartition, SnoozeSource } from "./snooze-suggest";
 import {
   lastRow as computeLastRow,
@@ -7,7 +8,13 @@ import {
   rankDeep,
   shownRows,
 } from "./snooze-suggest";
-import { initialUi, type UiAction, type UiState, uiReducer } from "./store";
+import {
+  initialUi,
+  type UiAction,
+  type UiState,
+  uiReducer,
+  undoWrites,
+} from "./store";
 import { TodoStoreHolder } from "./store-holder";
 import {
   epochToIso,
@@ -16,7 +23,10 @@ import {
   matchesFilter,
   newTodo,
   type Todo,
+  withDone,
   withPinToggled,
+  withReactivated,
+  withRepeat,
 } from "./todo";
 
 const MAX_NOW_STALENESS_MS = 5 * 60 * 1000;
@@ -160,17 +170,22 @@ export class AppState {
   markDone = (id: string): void => {
     const existing = this.#find(id);
     if (!existing) return;
-    void this.holder.getStore().update({
-      ...existing,
-      state: "DONE",
-      snoozeUntil: null,
-      position: null,
-      modifiedAt: Date.now(),
-    });
+    const { done, spawned } = withDone(
+      existing,
+      Date.now(),
+      crypto.randomUUID(),
+    );
+    const store = this.holder.getStore();
+    if (spawned) void store.apply([done, spawned], []);
+    else void store.update(done);
     this.#dispatch({ type: "setFocus", id: null });
     this.#dispatch({
       type: "setUndo",
-      entry: { kind: "complete", todos: [existing] },
+      entry: {
+        kind: "complete",
+        todos: [existing],
+        ...(spawned ? { spawned } : {}),
+      },
     });
   };
 
@@ -178,13 +193,13 @@ export class AppState {
   reactivate = (id: string): void => {
     const existing = this.#find(id);
     if (!existing) return;
-    void this.holder.getStore().update({
-      ...existing,
-      state: "ACTIVE",
-      snoozeUntil: null,
-      position: null,
-      modifiedAt: Date.now(),
-    });
+    void this.holder.getStore().update(withReactivated(existing, Date.now()));
+  };
+
+  setRepeat = (id: string, draft: RepeatDraft): void => {
+    const existing = this.#find(id);
+    if (!existing) return;
+    void this.holder.getStore().update(withRepeat(existing, draft, Date.now()));
   };
 
   /** False (and nothing written) when `epoch` is no longer in the future. */
@@ -275,14 +290,12 @@ export class AppState {
     const entry = this.lastUndo;
     if (!entry || entry.todos.length === 0) return;
     const store = this.holder.getStore();
-    if (entry.kind === "delete") {
-      void store.restoreMany(entry.todos);
-    } else {
-      // Rows still exist (unlike delete), so re-apply the prior snapshot via update.
-      for (const prior of entry.todos) void store.update(prior);
-      if (entry.kind === "snooze" && entry.snoozeUndo) {
-        this.holder.snoozeStats.undo(entry.snoozeUndo);
-      }
+    const { put, remove, restore } = undoWrites(entry);
+    if (restore.length > 0) void store.restoreMany(restore);
+    if (remove.length > 0) void store.apply(put, remove);
+    else for (const prior of put) void store.update(prior);
+    if (entry.kind === "snooze" && entry.snoozeUndo) {
+      this.holder.snoozeStats.undo(entry.snoozeUndo);
     }
     this.#dispatch({ type: "clearUndo" });
   };

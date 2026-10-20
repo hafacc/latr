@@ -15,6 +15,9 @@ function todo(overrides: Partial<Todo>): Todo {
     pinned: overrides.pinned ?? false,
     position: overrides.position ?? null,
     deleted: false,
+    repeat: null,
+    repeatSpawned: false,
+    occurrence: null,
   };
 }
 
