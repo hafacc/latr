@@ -172,7 +172,10 @@ export function rankBySearch(todos: readonly Todo[], query: string): Todo[] {
     .split(/\s+/)
     .filter((w) => w.length > 0);
   if (words.length === 0) return todos.slice();
-  const patterns = words.map((w) => new RegExp(`\\b${escapeRegex(w)}`));
+  // `\b` only sits before a word char, so a word like `#work` anchors on "no word char before".
+  const patterns = words.map(
+    (w) => new RegExp(`${/^\w/.test(w) ? "\\b" : "(?<!\\w)"}${escapeRegex(w)}`),
+  );
   const scored: { t: Todo; score: number }[] = [];
   for (const t of todos) {
     const hay = plainText(t.text).toLowerCase();

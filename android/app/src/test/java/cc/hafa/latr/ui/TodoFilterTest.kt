@@ -196,6 +196,13 @@ class TodoFilterTest {
     }
 
     @Test
+    fun `search matches a word starting with a symbol, only at a word start`() {
+        val tagged = todo(id = "tagged", text = "fix the build #work")
+        val inside = todo(id = "inside", text = "learn C#work")
+        assertEquals(listOf("tagged"), listOf(tagged, inside).sorted(StatusFilter.ACTIVE, "#work"))
+    }
+
+    @Test
     fun `search matches through inline style markers`() {
         val italic = todo(id = "italic", text = "buy _milk_")
         val bold = todo(id = "bold", text = "*milk* run")
