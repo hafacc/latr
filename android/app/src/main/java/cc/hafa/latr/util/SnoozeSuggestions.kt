@@ -690,10 +690,10 @@ object SnoozeSuggestions {
 
     private fun dayPhrase(dateRule: String, dist: Int, weekday: DayOfWeek): DayPhrase {
         val today = DayPhrase("today", "", adjectival = false)
+        if (dist == 1) return DayPhrase("tomorrow", "Tomorrow", adjectival = true)
         if (D_RE.matches(dateRule) || W_RE.matches(dateRule)) {
             return when {
                 dist == 0 -> today
-                dist == 1 -> DayPhrase("tomorrow", "Tomorrow", adjectival = true)
                 dist <= 6 -> DayPhrase("this", "This ${dayName(weekday)}", adjectival = true)
                 dist <= 13 -> DayPhrase("next", "Next ${dayName(weekday)}", adjectival = true)
                 dist % 7 == 0 && dist <= 28 ->
