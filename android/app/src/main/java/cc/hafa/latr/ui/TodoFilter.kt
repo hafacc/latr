@@ -72,7 +72,11 @@ fun List<Todo>.filterAndSort(
             val searchPatterns =
                 searchQuery.split("\\s+".toRegex())
                     .filter { it.isNotBlank() }
-                    .map { "\\b${Regex.escape(it.lowercase())}".toRegex() }
+                    // `\b` only sits before a word char, so a word like `#work` anchors on "no word char before".
+                    .map { word ->
+                        val anchor = if (word.first().isLetterOrDigit() || word.first() == '_') "\\b" else "(?<!\\w)"
+                        "$anchor${Regex.escape(word.lowercase())}".toRegex()
+                    }
             sorted
                 .map { todo ->
                     val todoTextLower = InlineStyle.plain(todo.text).lowercase()
