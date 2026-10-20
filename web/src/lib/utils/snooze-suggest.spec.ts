@@ -366,9 +366,9 @@ describe("labelFor", () => {
     );
   });
 
-  test("the upcoming Thursday seen on Wednesday reads This Thursday", () => {
+  test("the upcoming Thursday seen on Wednesday reads Tomorrow", () => {
     expect(label("Wd4@0900", "2026-09-23T10:00:00")).toBe(
-      "This Thursday morning, 09:00",
+      "Tomorrow morning, 09:00",
     );
   });
 

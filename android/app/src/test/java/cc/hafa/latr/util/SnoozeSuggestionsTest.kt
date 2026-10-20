@@ -297,7 +297,8 @@ class SnoozeSuggestionsTest {
 
     @Test
     fun `this and next weekday labels`() {
-        assertEquals("This Thursday morning, 09:00", label("Wd4@0900", LocalDateTime.of(2026, 9, 24, 9, 0), LocalDateTime.of(2026, 9, 23, 10, 0)))
+        assertEquals("Tomorrow morning, 09:00", label("Wd4@0900", LocalDateTime.of(2026, 9, 24, 9, 0), LocalDateTime.of(2026, 9, 23, 10, 0)))
+        assertEquals("This Friday morning, 09:00", label("Wd5@0900", LocalDateTime.of(2026, 9, 25, 9, 0), LocalDateTime.of(2026, 9, 23, 10, 0)))
         assertEquals("Next Thursday morning, 09:00", label("Wd4@0900", LocalDateTime.of(2026, 10, 1, 9, 0), LocalDateTime.of(2026, 9, 24, 7, 0)))
     }
 
