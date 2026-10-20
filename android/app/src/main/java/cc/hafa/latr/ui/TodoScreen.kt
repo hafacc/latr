@@ -301,16 +301,25 @@ private fun TopBar(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        val searchTextColor = MaterialTheme.colorScheme.onSurface
+                        val searchTagColor = MaterialTheme.colorScheme.primary
+                        val searchStyle = remember(searchTextColor, searchTagColor) {
+                            InlineStyleTransformation(searchTextColor, searchTagColor, tagsOnly = true)
+                        }
+                        var searchLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
                         BasicTextField(
                             value = searchQuery,
                             onValueChange = onSearchQueryChange,
                             singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = searchTextColor),
+                            visualTransformation = searchStyle,
+                            onTextLayout = { searchLayout = it },
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                             keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .tagChips(searchQuery, { searchLayout }, searchTagColor)
                                 .focusRequester(focusRequester)
                         )
                     }
@@ -1047,6 +1056,7 @@ fun TodoItem(
     // Tap offset into the text, or null if the tap missed it (→ caret to end).
     var caretFromTap by remember(todo.id) { mutableStateOf<Int?>(null) }
     var textLayoutResult by remember(todo.id) { mutableStateOf<TextLayoutResult?>(null) }
+    var editorLayoutResult by remember(todo.id) { mutableStateOf<TextLayoutResult?>(null) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -1293,7 +1303,10 @@ fun TodoItem(
             val placeholderTextStyle = MaterialTheme.typography.bodyLarge.copy(
                 color = colorScheme.onSurfaceVariant,
             )
-            val inlineStyle = remember(editorTextStyle.color) { InlineStyleTransformation(editorTextStyle.color) }
+            val tagColor = colorScheme.primary
+            val inlineStyle = remember(editorTextStyle.color, tagColor) {
+                InlineStyleTransformation(editorTextStyle.color, tagColor)
+            }
             Icon(
                 imageVector = stateIcon,
                 contentDescription = if (todo.pinned) "Pinned" else null,
@@ -1330,8 +1343,10 @@ fun TodoItem(
                                 currentOnUpdate(edited, false)
                             }
                         },
+                        onTextLayout = { editorLayoutResult = it },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .tagChips(fieldValue.text, { editorLayoutResult }, tagColor)
                             .focusRequester(focusRequester)
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
@@ -1374,13 +1389,14 @@ fun TodoItem(
                     // Passively record the tap's caret offset (Initial pass, no consume) so onClick opens there.
                     Text(
                         text = if (todo.text.isEmpty()) AnnotatedString("Enter todo...")
-                        else remember(todo.text, editorTextStyle.color) {
-                            styledTodoText(todo.text, editorTextStyle.color)
+                        else remember(todo.text, editorTextStyle.color, tagColor) {
+                            styledTodoText(todo.text, editorTextStyle.color, tagColor)
                         },
                         style = if (todo.text.isEmpty()) placeholderTextStyle else editorTextStyle,
                         onTextLayout = { textLayoutResult = it },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .tagChips(todo.text, { textLayoutResult }, tagColor)
                             .pointerInput(todo.id) {
                                 // Passive Initial-pass observer: never reads isConsumed (the parent
                                 // clickable consumes the down, which would falsely read as cancel),

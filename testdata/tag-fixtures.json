@@ -1,0 +1,33 @@
+{
+  "_doc": {
+    "tags": "[start, end] in UTF-16 code units, end exclusive; a tag includes its '#'. Sorted by start.",
+    "rule": "'#' at the start, or after whitespace (as in inline-style-fixtures) or one of ( [ { \" ' * _ “ ‘ «; then letters, decimal digits, combining marks, '_', '-', '/'; trailing '_', '-', '/' are not part of it; it needs at least one letter."
+  },
+  "cases": [
+    { "name": "alone", "in": "#work", "tags": [[0, 5]] },
+    { "name": "after a word", "in": "fix the build #work", "tags": [[14, 19]] },
+    { "name": "two tags", "in": "#home buy milk #errand", "tags": [[0, 5], [15, 22]] },
+    { "name": "ends at punctuation", "in": "call #home, then", "tags": [[5, 10]] },
+    { "name": "ends at a period", "in": "done #work.", "tags": [[5, 10]] },
+    { "name": "C# stays literal", "in": "learn C# today", "tags": [] },
+    { "name": "a letter before stays literal", "in": "a#b", "tags": [] },
+    { "name": "url fragment stays literal", "in": "see https://x.com/page#section", "tags": [] },
+    { "name": "url with slash before stays literal", "in": "x.com/#/route", "tags": [] },
+    { "name": "all digits stay literal", "in": "issue #42", "tags": [] },
+    { "name": "digits and dashes stay literal", "in": "#1-2", "tags": [] },
+    { "name": "digits with a letter count", "in": "#2026q1", "tags": [[0, 7]] },
+    { "name": "bare hash stays literal", "in": "a # b", "tags": [] },
+    { "name": "double hash stays literal", "in": "##work", "tags": [] },
+    { "name": "snake case is one tag", "in": "#snake_case", "tags": [[0, 11]] },
+    { "name": "dash and slash inside", "in": "#work/admin-stuff", "tags": [[0, 17]] },
+    { "name": "trailing dash dropped", "in": "#work- now", "tags": [[0, 5]] },
+    { "name": "trailing underscore dropped, so italic can close", "in": "_#todo_", "tags": [[1, 6]] },
+    { "name": "inside bold", "in": "*#work*", "tags": [[1, 6]] },
+    { "name": "in parentheses", "in": "(#work)", "tags": [[1, 6]] },
+    { "name": "after a newline", "in": "a\n#work", "tags": [[2, 7]] },
+    { "name": "unicode letters", "in": "#café #日本", "tags": [[0, 5], [6, 9]] },
+    { "name": "decomposed accent", "in": "#café", "tags": [[0, 6]] },
+    { "name": "letter outside the BMP", "in": "#𐐀x", "tags": [[0, 4]] },
+    { "name": "emoji ends a tag", "in": "#hi😀", "tags": [[0, 3]] }
+  ]
+}

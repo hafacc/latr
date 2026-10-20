@@ -57,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -233,12 +234,16 @@ private fun SheetHeader(title: String, todoText: String, onBack: (() -> Unit)? =
             Text(title, style = MaterialTheme.typography.titleLarge)
             if (todoText.isNotBlank()) {
                 val color = MaterialTheme.colorScheme.onSurfaceVariant
+                val tagColor = MaterialTheme.colorScheme.primary
+                var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
                 Text(
-                    remember(todoText, color) { styledTodoText(todoText, color) },
+                    remember(todoText, color, tagColor) { styledTodoText(todoText, color, tagColor) },
                     style = MaterialTheme.typography.bodyMedium,
                     color = color,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { layout = it },
+                    modifier = Modifier.tagChips(todoText, { layout }, tagColor),
                 )
             }
         }

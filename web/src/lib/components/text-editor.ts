@@ -11,6 +11,7 @@ import {
   EditorView,
 } from "@codemirror/view";
 import { parseInlineStyles, wrapSelection } from "../utils/inline-style";
+import { parseTags } from "../utils/tags";
 
 export type TextEditorHandle = {
   focus: (caret?: number | "end") => void;
@@ -23,6 +24,7 @@ export type TextEditorHandle = {
 const BOLD = Decoration.mark({ class: "md-bold" });
 const ITALIC = Decoration.mark({ class: "md-italic" });
 const MARKER = Decoration.mark({ class: "md-marker" });
+const TAG = Decoration.mark({ class: "md-tag" });
 
 export function inlineDecorations(doc: string): DecorationSet {
   const ranges = [];
@@ -33,6 +35,7 @@ export function inlineDecorations(doc: string): DecorationSet {
     ranges.push(MARKER.range(span.start, span.start + 1));
     ranges.push(MARKER.range(span.end - 1, span.end));
   }
+  for (const tag of parseTags(doc)) ranges.push(TAG.range(tag.start, tag.end));
   return Decoration.set(ranges, true);
 }
 

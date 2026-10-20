@@ -1,3 +1,5 @@
+import { parseTags } from "./tags";
+
 export type InlineStyle = "bold" | "italic";
 
 // `start`/`end` are UTF-16 offsets covering both markers: text[start] and text[end - 1].
@@ -98,20 +100,35 @@ export function plainText(text: string): string {
 export type StyledNode =
   | { kind: "text"; text: string }
   | { kind: "marker"; text: string }
+  | { kind: "tag"; text: string }
   | { kind: "span"; style: InlineStyle; children: StyledNode[] };
 
-/** Nests the (properly nested) spans into a tree, with markers as their own leaves. */
+/** Nests the (properly nested) spans into a tree, with markers and `#tags` as their own leaves. */
 export function styledTree(text: string): StyledNode[] {
   const spans = parseInlineStyles(text);
+  const tags = parseTags(text);
   let i = 0;
+  // Pushes text[from, to), cutting out the parts of tags inside it.
+  function pushText(nodes: StyledNode[], from: number, to: number) {
+    let pos = from;
+    for (const tag of tags) {
+      const start = Math.max(tag.start, pos);
+      const end = Math.min(tag.end, to);
+      if (start >= end) continue;
+      if (start > pos)
+        nodes.push({ kind: "text", text: text.slice(pos, start) });
+      nodes.push({ kind: "tag", text: text.slice(start, end) });
+      pos = end;
+    }
+    if (pos < to) nodes.push({ kind: "text", text: text.slice(pos, to) });
+  }
   function build(limit: number, from: number): StyledNode[] {
     const nodes: StyledNode[] = [];
     let pos = from;
     while (pos < limit) {
       const span = i < spans.length ? spans[i] : null;
       if (span && span.start < limit) {
-        if (span.start > pos)
-          nodes.push({ kind: "text", text: text.slice(pos, span.start) });
+        if (span.start > pos) pushText(nodes, pos, span.start);
         i++;
         const inner = build(span.end - 1, span.start + 1);
         nodes.push({
@@ -125,7 +142,7 @@ export function styledTree(text: string): StyledNode[] {
         });
         pos = span.end;
       } else {
-        nodes.push({ kind: "text", text: text.slice(pos, limit) });
+        pushText(nodes, pos, limit);
         pos = limit;
       }
     }
