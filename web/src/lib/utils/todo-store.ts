@@ -13,7 +13,14 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { readPosition } from "./position";
-import { fromFirestore, readState, type Todo, toFirestoreFields } from "./todo";
+import { readRepeat } from "./repeat";
+import {
+  fromFirestore,
+  readOccurrence,
+  readState,
+  type Todo,
+  toFirestoreFields,
+} from "./todo";
 
 const STORAGE_KEY = "latr:todos:v1";
 
@@ -36,6 +43,14 @@ function rehydrateTimestamp(v: unknown): Timestamp | null {
   } else return null;
 }
 
+/** `todos` with each of `put` replacing its row, or added on top when new. */
+export function upsert(todos: readonly Todo[], put: readonly Todo[]): Todo[] {
+  const byId = new Map(put.map((t) => [t.id, t]));
+  const updated = todos.map((t) => byId.get(t.id) ?? t);
+  const existing = new Set(todos.map((t) => t.id));
+  return [...put.filter((t) => !existing.has(t.id)), ...updated];
+}
+
 export interface TodoStore {
   getTodos(): Todo[];
   isSyncing(): boolean;
@@ -43,6 +58,8 @@ export interface TodoStore {
   insert(todo: Todo): Promise<void>;
   update(todo: Todo): Promise<void>;
   delete(todo: Todo): Promise<void>;
+  /** Saves `put` (inserting rows it doesn't have) and deletes `remove`, as one write. */
+  apply(put: Todo[], remove: Todo[]): Promise<void>;
   clearAllDone(): Promise<Todo[]>;
   restoreMany(todos: Todo[]): Promise<void>;
   deleteEmptyTodosExcept(exceptId: string): Promise<void>;
@@ -77,6 +94,7 @@ abstract class BaseTodoStore implements TodoStore {
   abstract insert(todo: Todo): Promise<void>;
   abstract update(todo: Todo): Promise<void>;
   abstract delete(todo: Todo): Promise<void>;
+  abstract apply(put: Todo[], remove: Todo[]): Promise<void>;
   abstract clearAllDone(): Promise<Todo[]>;
   abstract restoreMany(todos: Todo[]): Promise<void>;
   abstract deleteEmptyTodosExcept(exceptId: string): Promise<void>;
@@ -106,6 +124,9 @@ export class LocalTodoStore extends BaseTodoStore {
         // A missing `deleted` would reach Firestore as undefined, which it rejects.
         deleted: t.deleted === true,
         position: readPosition(t.position),
+        repeat: readRepeat(t.repeat),
+        repeatSpawned: t.repeatSpawned === true,
+        occurrence: readOccurrence(t.occurrence),
         // JSON.parse leaves serverModifiedAt as a {seconds, nanoseconds}
         // plain object; rehydrate it so the type signature isn't a lie.
         serverModifiedAt: rehydrateTimestamp(t.serverModifiedAt),
@@ -150,6 +171,12 @@ export class LocalTodoStore extends BaseTodoStore {
   async delete(todo: Todo): Promise<void> {
     this.tombstone([todo]);
     this.commit(this.todos.filter((t) => t.id !== todo.id));
+  }
+
+  async apply(put: Todo[], remove: Todo[]): Promise<void> {
+    const removedIds = new Set(remove.map((t) => t.id));
+    this.tombstone(remove);
+    this.commit(upsert(this.todos, put).filter((t) => !removedIds.has(t.id)));
   }
 
   async clearAllDone(): Promise<Todo[]> {
@@ -293,6 +320,20 @@ export class FirestoreTodoStore extends BaseTodoStore {
     this.todos = this.todos.filter((t) => t.id !== todo.id);
     this.emit();
     await setDoc(doc(this.col, todo.id), this.tombstone(), { merge: true });
+  }
+
+  async apply(put: Todo[], remove: Todo[]): Promise<void> {
+    const removedIds = new Set(remove.map((t) => t.id));
+    this.todos = upsert(this.todos, put).filter((t) => !removedIds.has(t.id));
+    this.emit();
+    const batch = writeBatch(db());
+    for (const t of put) {
+      batch.set(doc(this.col, t.id), this.withServerTs(t), { merge: true });
+    }
+    for (const t of remove) {
+      batch.set(doc(this.col, t.id), this.tombstone(), { merge: true });
+    }
+    await batch.commit();
   }
 
   async clearAllDone(): Promise<Todo[]> {

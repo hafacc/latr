@@ -1,5 +1,7 @@
 package cc.hafa.latr.data
 
+import cc.hafa.latr.util.Repeat
+import cc.hafa.latr.util.RepeatUnit
 import com.google.firebase.Timestamp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -30,6 +32,7 @@ class TodoMapTest {
             setOf(
                 "text", "createdAt", "modifiedAt", "serverModifiedAt",
                 "state", "snoozeUntil", "pinned", "position", "deleted",
+                "repeat", "repeatSpawned", "occurrence",
             ),
             map.keys,
         )
@@ -132,5 +135,35 @@ class TodoMapTest {
         assertEquals(position, Todo.fromMap("id", mapOf("position" to position)).position)
         assertNull(Todo.fromMap("id", mapOf("position" to "not a position")).position)
         assertNull(Todo.fromMap("id", emptyMap()).position)
+    }
+
+    @Test
+    fun `repeat fields round-trip through the Firestore map, Room and a malformed rule reads as none`() {
+        val rule = Repeat(1, RepeatUnit.WEEK, 3, 15, "07:00", "2026-10-19")
+        val todo = Todo(repeat = rule, repeatSpawned = true, occurrence = "2026-10-21T07:00:00")
+        val map = todo.toMap()
+        // Firestore hands numbers back as Long.
+        val wire = map.mapValues { (key, value) ->
+            if (key == "repeat") (value as Map<*, *>).mapValues { (_, field) ->
+                when (field) {
+                    is Int -> field.toLong()
+                    is List<*> -> field.map { (it as Int).toLong() }
+                    else -> field
+                }
+            } else value
+        }
+        val read = Todo.fromMap("id", wire)
+        assertEquals(rule, read.repeat)
+        assertEquals(true, read.repeatSpawned)
+        assertEquals("2026-10-21T07:00:00", read.occurrence)
+
+        val converters = Converters()
+        assertEquals(rule, converters.toRepeat(converters.fromRepeat(rule)))
+        assertNull(converters.toRepeat(converters.fromRepeat(null)))
+
+        val empty = Todo.fromMap("id", mapOf("repeat" to mapOf("every" to 0L)))
+        assertNull(empty.repeat)
+        assertEquals(false, empty.repeatSpawned)
+        assertNull(empty.occurrence)
     }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Timestamp } from "firebase/firestore";
 import { timeKey } from "./position";
+import type { Repeat } from "./repeat";
 import {
   epochToIso,
   fromFirestore,
@@ -11,7 +12,10 @@ import {
   sortForFilter,
   type Todo,
   toFirestoreFields,
+  withDone,
   withPinToggled,
+  withReactivated,
+  withRepeat,
 } from "./todo";
 
 function todo(overrides: Partial<Todo> = {}): Todo {
@@ -27,6 +31,9 @@ function todo(overrides: Partial<Todo> = {}): Todo {
     pinned: overrides.pinned ?? false,
     position: overrides.position ?? null,
     deleted: overrides.deleted ?? false,
+    repeat: overrides.repeat ?? null,
+    repeatSpawned: overrides.repeatSpawned ?? false,
+    occurrence: overrides.occurrence ?? null,
   };
 }
 
@@ -462,5 +469,151 @@ describe("rankBySearch", () => {
       "italic",
       "bold",
     ]);
+  });
+});
+
+const MONDAYS: Repeat = {
+  every: 1,
+  unit: "week",
+  weekday: 1,
+  monthDay: 1,
+  at: "07:00",
+  anchor: "2026-10-19",
+};
+
+describe("repeat fields on the wire", () => {
+  test("round trip through Firestore fields", () => {
+    const t = todo({
+      repeat: MONDAYS,
+      repeatSpawned: true,
+      occurrence: "2026-10-19T07:00:00",
+    });
+    const back = fromFirestore(t.id, toFirestoreFields(t));
+    expect(back.repeat).toEqual(MONDAYS);
+    expect(back.repeatSpawned).toBe(true);
+    expect(back.occurrence).toBe("2026-10-19T07:00:00");
+  });
+
+  test("missing or malformed fields read as a one-off", () => {
+    const back = fromFirestore("x", {
+      repeat: { every: 9 },
+      repeatSpawned: "yes",
+      occurrence: 12,
+    });
+    expect(back.repeat).toBeNull();
+    expect(back.repeatSpawned).toBe(false);
+    expect(back.occurrence).toBeNull();
+    expect(fromFirestore("y", {}).repeat).toBeNull();
+  });
+});
+
+describe("withDone", () => {
+  // Wednesday 2026-10-21 10:00 local.
+  const now = new Date(2026, 9, 21, 10, 0, 0).getTime();
+
+  test("a one-off makes nothing", () => {
+    const { done, spawned } = withDone(todo({ id: "a" }), now, "b");
+    expect(done.state).toBe("DONE");
+    expect(done.modifiedAt).toBe(now);
+    expect(done.repeatSpawned).toBe(false);
+    expect(spawned).toBeNull();
+  });
+
+  test("a repeating todo makes its next copy", () => {
+    const original = todo({
+      id: "a",
+      text: "Take out recycling",
+      pinned: true,
+      repeat: MONDAYS,
+      snoozeUntil: "2026-10-19T07:00:00",
+      occurrence: "2026-10-19T07:00:00",
+      position: "abc",
+      createdAt: 1,
+    });
+    const { done, spawned } = withDone(original, now, "b");
+    expect(done).toEqual({
+      ...original,
+      state: "DONE",
+      snoozeUntil: null,
+      position: null,
+      modifiedAt: now,
+      repeatSpawned: true,
+    });
+    expect(spawned).toEqual({
+      id: "b",
+      text: "Take out recycling",
+      state: "ACTIVE",
+      createdAt: now,
+      modifiedAt: now,
+      serverModifiedAt: null,
+      snoozeUntil: "2026-10-26T07:00:00",
+      pinned: true,
+      position: null,
+      deleted: false,
+      repeat: MONDAYS,
+      repeatSpawned: false,
+      occurrence: "2026-10-26T07:00:00",
+    });
+  });
+
+  test("done early counts from the occurrence, not now", () => {
+    const original = todo({
+      repeat: MONDAYS,
+      occurrence: "2026-10-26T07:00:00",
+      snoozeUntil: "2026-10-26T07:00:00",
+    });
+    const { spawned } = withDone(original, now, "b");
+    expect(spawned?.occurrence).toBe("2026-11-02T07:00:00");
+  });
+
+  test("a todo that already made its copy makes nothing", () => {
+    const original = todo({ repeat: MONDAYS, repeatSpawned: true });
+    const { done, spawned } = withDone(original, now, "b");
+    expect(spawned).toBeNull();
+    expect(done.repeatSpawned).toBe(true);
+    expect(done.repeat).toEqual(MONDAYS);
+  });
+});
+
+describe("withReactivated", () => {
+  const now = new Date(2026, 9, 21, 10, 0, 0).getTime();
+
+  test("unsnoozing stops the repeat", () => {
+    const snoozed = todo({
+      repeat: MONDAYS,
+      snoozeUntil: "2026-10-26T07:00:00",
+      occurrence: "2026-10-26T07:00:00",
+    });
+    const back = withReactivated(snoozed, now);
+    expect(back.snoozeUntil).toBeNull();
+    expect(back.repeat).toBeNull();
+    expect(back.repeatSpawned).toBe(false);
+    expect(back.occurrence).toBeNull();
+  });
+
+  test("restoring a done todo keeps the repeat and its spawned bit", () => {
+    const done = todo({ state: "DONE", repeat: MONDAYS, repeatSpawned: true });
+    const back = withReactivated(done, now);
+    expect(back.state).toBe("ACTIVE");
+    expect(back.repeat).toEqual(MONDAYS);
+    expect(back.repeatSpawned).toBe(true);
+  });
+});
+
+describe("withRepeat", () => {
+  test("anchors the rule and leaves snooze, place and modify time alone", () => {
+    const now = new Date(2026, 9, 21, 10, 0, 0).getTime();
+    const original = todo({
+      snoozeUntil: "2026-10-22T09:00:00",
+      position: "abc",
+      occurrence: "2026-10-20T07:00:00",
+      repeatSpawned: true,
+    });
+    const { anchor: _anchor, ...draft } = MONDAYS;
+    const updated = withRepeat(original, draft, now);
+    expect(updated).toEqual({
+      ...original,
+      repeat: { ...MONDAYS, anchor: "2026-10-26" },
+    });
   });
 });

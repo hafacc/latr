@@ -8,6 +8,7 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import cc.hafa.latr.util.Repeat
 import com.google.firebase.Timestamp
 
 class Converters {
@@ -29,11 +30,17 @@ class Converters {
     fun toTimestamp(millis: Long?): Timestamp? = millis?.let {
         Timestamp(Math.floorDiv(it, 1000), Math.floorMod(it, 1000) * 1_000_000)
     }
+
+    @TypeConverter
+    fun fromRepeat(repeat: Repeat?): String? = repeat?.toJson()
+
+    @TypeConverter
+    fun toRepeat(json: String?): Repeat? = Repeat.fromJson(json)
 }
 
 @Database(
     entities = [Todo::class, SnoozeSetEntity::class, SnoozeTodEntity::class, SnoozePickEntity::class],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -85,6 +92,14 @@ abstract class TodoDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE todos ADD COLUMN `repeat` TEXT")
+                db.execSQL("ALTER TABLE todos ADD COLUMN repeatSpawned INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE todos ADD COLUMN occurrence TEXT")
+            }
+        }
+
         // v9: serverModifiedAt → nullable (Timestamp via Converter); destructive.
         fun getDatabase(context: Context): TodoDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -93,7 +108,7 @@ abstract class TodoDatabase : RoomDatabase() {
                     TodoDatabase::class.java,
                     "todo_database"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_9_11, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance

@@ -1,4 +1,5 @@
 <script lang="ts">
+import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import type { IconType } from "./filters";
 
 let {
@@ -6,14 +7,23 @@ let {
   tint,
   text,
   time,
+  chevron = false,
   onClick,
 }: {
   icon: IconType;
-  tint: "snooze" | "neutral";
+  tint: "snooze" | "neutral" | "accent" | "accentStrong";
   text: string;
   time?: string;
+  chevron?: boolean;
   onClick: () => void;
 } = $props();
+
+const TILES = {
+  snooze: "bg-snooze-soft text-snooze",
+  neutral: "bg-surface-muted text-text-secondary",
+  accent: "bg-accent-soft text-accent",
+  accentStrong: "bg-accent text-on-accent",
+};
 </script>
 
 <button
@@ -25,9 +35,7 @@ let {
   <span
     class={[
       "w-7 h-7 shrink-0 rounded-lg flex items-center justify-center",
-      tint === "snooze"
-        ? "bg-snooze-soft text-snooze"
-        : "bg-surface-muted text-text-secondary",
+      TILES[tint],
     ]}
   >
     <Icon class="w-4 h-4" aria-hidden="true" />
@@ -37,5 +45,8 @@ let {
     <span class="text-[13px] text-text-secondary tabular-nums shrink-0">
       {time}
     </span>
+  {/if}
+  {#if chevron}
+    <ChevronRight class="w-3.5 h-3.5 shrink-0 text-muted" aria-hidden="true" />
   {/if}
 </button>

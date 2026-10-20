@@ -4,6 +4,7 @@ import Clock from "@lucide/svelte/icons/clock";
 import GripVertical from "@lucide/svelte/icons/grip-vertical";
 import Pin from "@lucide/svelte/icons/pin";
 import PinOff from "@lucide/svelte/icons/pin-off";
+import RepeatIcon from "@lucide/svelte/icons/repeat";
 import Trash2 from "@lucide/svelte/icons/trash-2";
 import Undo2 from "@lucide/svelte/icons/undo-2";
 import { flushSync, onDestroy, untrack } from "svelte";
@@ -11,6 +12,7 @@ import { getAppState } from "../utils/app-state.svelte";
 import { formatSnoozeTime } from "../utils/format";
 import { getModifierState } from "../utils/kbd-modifier.svelte";
 import { desktop } from "../utils/media.svelte";
+import { type RepeatDraft, repeatText } from "../utils/repeat";
 import type { SnoozeSource } from "../utils/snooze-suggest";
 import {
   commitThreshold,
@@ -310,6 +312,11 @@ function onPick(epoch: number, source: SnoozeSource, pickedKey?: string) {
   if (app.snooze(todo.id, epoch, source, pickedKey)) snoozeOpen = false;
 }
 
+function onRepeat(draft: RepeatDraft) {
+  app.setRepeat(todo.id, draft);
+  snoozeOpen = false;
+}
+
 function closeSnooze() {
   snoozeOpen = false;
 }
@@ -503,6 +510,17 @@ function closeSnooze() {
           </div>
         {/if}
       </div>
+      {#if !isDone && todo.repeat}
+        <div
+          class="flex items-start gap-1.5 pt-[3px] text-[13px] leading-[18px] text-text-secondary"
+        >
+          <RepeatIcon
+            class="w-[13px] h-[13px] mt-[2.5px] shrink-0"
+            aria-hidden="true"
+          />
+          <span class="min-w-0">{repeatText(todo.repeat)}</span>
+        </div>
+      {/if}
       {#if !desktop.current && isFocused}
         <div class="flex gap-1 pt-2 -ml-2">
           {#if isActivelySnoozed}
@@ -593,7 +611,12 @@ function closeSnooze() {
               {/if}
             </button>
             {#if snoozeOpen}
-              <SnoozePopover {onPick} onClose={closeSnooze} />
+              <SnoozePopover
+                repeat={todo.repeat}
+                {onPick}
+                {onRepeat}
+                onClose={closeSnooze}
+              />
             {/if}
           </div>
         {/if}
@@ -642,6 +665,12 @@ function closeSnooze() {
   </div>
 
   {#if !desktop.current && snoozeOpen}
-    <SnoozeSheet todoText={todo.text} {onPick} onClose={closeSnooze} />
+    <SnoozeSheet
+      todoText={todo.text}
+      repeat={todo.repeat}
+      {onPick}
+      {onRepeat}
+      onClose={closeSnooze}
+    />
   {/if}
 </div>

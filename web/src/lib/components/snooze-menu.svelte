@@ -5,10 +5,12 @@ import CalendarDays from "@lucide/svelte/icons/calendar-days";
 import CalendarPlus from "@lucide/svelte/icons/calendar-plus";
 import History from "@lucide/svelte/icons/history";
 import Moon from "@lucide/svelte/icons/moon";
+import RepeatIcon from "@lucide/svelte/icons/repeat";
 import Sun from "@lucide/svelte/icons/sun";
 import Sunrise from "@lucide/svelte/icons/sunrise";
 import Timer from "@lucide/svelte/icons/timer";
 import { getAppState } from "../utils/app-state.svelte";
+import { type Repeat, type RepeatDraft, repeatText } from "../utils/repeat";
 import {
   formatClock,
   type RowIcon,
@@ -17,15 +19,27 @@ import {
 import CustomPicker from "./custom-picker.svelte";
 import type { IconType } from "./filters";
 import MenuRowButton from "./menu-row-button.svelte";
+import RepeatEditor from "./repeat-editor.svelte";
+
+/** Which part of the menu shows: the rows, the date and time picker, or the repeat editor. */
+type SnoozeMenuStep = "menu" | "custom" | "repeat";
 
 let {
+  repeat,
   onPick,
+  onRepeat,
+  step = $bindable("menu"),
+  repeatTimeStep = $bindable(false),
 }: {
+  repeat: Repeat | null;
   onPick: (
     epochMillis: number,
     source: SnoozeSource,
     pickedKey?: string,
   ) => void;
+  onRepeat: (draft: RepeatDraft) => void;
+  step?: SnoozeMenuStep;
+  repeatTimeStep?: boolean;
 } = $props();
 
 const MENU_CLOCK_TICK_MS = 30_000;
@@ -41,7 +55,6 @@ const ROW_ICONS: Record<RowIcon, IconType> = {
 };
 
 const app = getAppState();
-let customOpen = $state(false);
 
 $effect(() => {
   app.refreshNow();
@@ -50,12 +63,21 @@ $effect(() => {
 });
 </script>
 
-{#if customOpen}
+{#if step === "custom"}
   <CustomPicker
     {onPick}
     onBack={() => {
-      customOpen = false;
+      step = "menu";
     }}
+  />
+{:else if step === "repeat"}
+  <RepeatEditor
+    {repeat}
+    onSave={onRepeat}
+    onBack={() => {
+      step = "menu";
+    }}
+    bind:timeStep={repeatTimeStep}
   />
 {:else}
   <div class="flex flex-col gap-0.5 p-1.5">
@@ -91,8 +113,28 @@ $effect(() => {
       tint="neutral"
       text="Pick date & time…"
       onClick={() => {
-        customOpen = true;
+        step = "custom";
       }}
     />
+    {#if repeat}
+      <MenuRowButton
+        icon={RepeatIcon}
+        tint="accentStrong"
+        text={repeatText(repeat)}
+        chevron
+        onClick={() => {
+          step = "repeat";
+        }}
+      />
+    {:else}
+      <MenuRowButton
+        icon={RepeatIcon}
+        tint="accent"
+        text="Repeat…"
+        onClick={() => {
+          step = "repeat";
+        }}
+      />
+    {/if}
   </div>
 {/if}

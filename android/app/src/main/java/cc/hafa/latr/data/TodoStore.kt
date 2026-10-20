@@ -9,6 +9,9 @@ interface TodoStore {
 
     suspend fun insert(todo: Todo)
     suspend fun update(todo: Todo)
+
+    /** Write every todo in one batch, creating any that don't exist yet. */
+    suspend fun writeAll(todos: List<Todo>)
     suspend fun delete(todo: Todo)
 
     suspend fun clearAllDone(done: List<Todo>)

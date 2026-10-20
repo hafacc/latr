@@ -7,6 +7,21 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import cc.hafa.latr.data.localIso
+import cc.hafa.latr.util.Repeat
+import cc.hafa.latr.util.RepeatUnit
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.TextAutoSize
@@ -81,14 +96,41 @@ import java.time.ZoneId
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.delay
 
-private enum class SheetStep { MENU, DATE, TIME }
+private enum class SheetStep { MENU, DATE, TIME, REPEAT, REPEAT_TIME }
 
 /** One rendered menu row: a learned suggestion, the persisted "Last" custom pick, or "Custom". */
 private sealed class MenuRow {
     data class Suggestion(val row: SnoozeRow) : MenuRow()
     data class Last(val epochMillis: Long) : MenuRow()
     data object Custom : MenuRow()
+    data object Repeat : MenuRow()
 }
+
+/** The repeat editor's unsaved choices. */
+private data class RepeatDraft(
+    val every: Int,
+    val unit: RepeatUnit,
+    val weekday: Int,
+    val monthDay: Int,
+    val at: String,
+)
+
+private val WEEKDAY_NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+private fun clockText(clockMinutes: Int): String = LocalTime.of(clockMinutes / 60, clockMinutes % 60).toString()
+
+private fun initialDraft(repeat: Repeat?, today: LocalDate, quickTimes: List<QuickTime>): RepeatDraft =
+    if (repeat != null) {
+        RepeatDraft(repeat.every, repeat.unit, repeat.weekday, repeat.monthDay, repeat.at)
+    } else {
+        RepeatDraft(
+            every = 1,
+            unit = RepeatUnit.WEEK,
+            weekday = today.dayOfWeek.value,
+            monthDay = today.dayOfMonth,
+            at = quickTimes.maxByOrNull { it.weight }?.let { clockText(it.clockMinutes) } ?: "09:00",
+        )
+    }
 
 private val MENU_CLOCK_TICK = 30.seconds
 
@@ -102,6 +144,7 @@ private fun buildMenuRows(
     rows += suggestions.map { MenuRow.Suggestion(it) }
     SnoozeSuggestions.lastRow(partitions, now, suggestions)?.let { rows += MenuRow.Last(it) }
     rows += MenuRow.Custom
+    rows += MenuRow.Repeat
     return rows
 }
 
@@ -111,9 +154,11 @@ private fun buildMenuRows(
 fun SnoozeBottomSheet(
     onDismiss: () -> Unit,
     onSnoozeSelected: (isoDateTime: String, source: String, pickedKey: String?, pickLogKey: String) -> Boolean,
+    onRepeatSaved: (Repeat) -> Unit,
     partitions: List<SnoozeStatsSnapshot>,
     modifier: Modifier = Modifier,
     todoText: String = "",
+    repeat: Repeat? = null,
     initialNow: Instant? = null,
     zone: ZoneId = ZoneId.systemDefault(),
 ) {
@@ -130,6 +175,12 @@ fun SnoozeBottomSheet(
     val quickTimes = remember(now, partitions) { SnoozeSuggestions.quickTimes(partitions, now) }
     var step by remember { mutableStateOf(SheetStep.MENU) }
     val today = LocalDate.ofInstant(now, zone)
+    var draft by remember { mutableStateOf(initialDraft(repeat, today, quickTimes)) }
+    val saveRepeat = { at: String ->
+        val nowIso = localIso(System.currentTimeMillis(), zone)
+        onRepeatSaved(Repeat.anchored(draft.every, draft.unit, draft.weekday, draft.monthDay, at, nowIso))
+        onDismiss()
+    }
     val datePickerState = rememberDatePickerState(
         initialSelectedDateMillis = PickerDates.initialPickerMillis(
             SnoozeSuggestions.defaultCustomDate(LocalDateTime.ofInstant(now, zone))
@@ -156,7 +207,11 @@ fun SnoozeBottomSheet(
         modifier = modifier
     ) {
         BackHandler(enabled = step != SheetStep.MENU) {
-            step = if (step == SheetStep.TIME) SheetStep.DATE else SheetStep.MENU
+            step = when (step) {
+                SheetStep.TIME -> SheetStep.DATE
+                SheetStep.REPEAT_TIME -> SheetStep.REPEAT
+                else -> SheetStep.MENU
+            }
         }
         AnimatedContent(
             targetState = step,
@@ -176,11 +231,13 @@ fun SnoozeBottomSheet(
                     SheetStep.MENU -> MenuStep(
                         rows = rows,
                         todoText = todoText,
+                        repeat = repeat,
                         now = now,
                         zone = zone,
                         onRow = { row ->
                             when (row) {
                                 is MenuRow.Custom -> step = SheetStep.DATE
+                                is MenuRow.Repeat -> step = SheetStep.REPEAT
                                 is MenuRow.Suggestion -> pick(row.row.epochMillis, "suggestion", row.row.key)
                                 is MenuRow.Last -> pick(row.epochMillis, "last", null)
                             }
@@ -211,6 +268,23 @@ fun SnoozeBottomSheet(
                             onConfirm = { epochMillis -> pick(epochMillis, "custom", null) },
                         )
                     }
+
+                    SheetStep.REPEAT -> RepeatStep(
+                        draft = draft,
+                        onDraftChange = { draft = it },
+                        todoText = todoText,
+                        quickTimes = quickTimes,
+                        onBack = { step = SheetStep.MENU },
+                        onQuickTime = { at -> saveRepeat(at) },
+                        onOtherTime = { step = SheetStep.REPEAT_TIME },
+                    )
+
+                    SheetStep.REPEAT_TIME -> RepeatTimeStep(
+                        at = draft.at,
+                        todoText = todoText,
+                        onBack = { step = SheetStep.REPEAT },
+                        onSave = { at -> saveRepeat(at) },
+                    )
                 }
             }
         }
@@ -254,13 +328,14 @@ private fun SheetHeader(title: String, todoText: String, onBack: (() -> Unit)? =
 private fun MenuStep(
     rows: List<MenuRow>,
     todoText: String,
+    repeat: Repeat?,
     now: Instant,
     zone: ZoneId,
     onRow: (MenuRow) -> Unit,
 ) {
     SheetHeader(title = "Snooze", todoText = todoText)
     rows.forEach { row ->
-        MenuRowItem(row = row, now = now, zone = zone, onClick = { onRow(row) })
+        MenuRowItem(row = row, repeat = repeat, now = now, zone = zone, onClick = { onRow(row) })
     }
 }
 
@@ -355,8 +430,199 @@ private fun TimeStep(
 }
 
 @Composable
+private fun RepeatStep(
+    draft: RepeatDraft,
+    onDraftChange: (RepeatDraft) -> Unit,
+    todoText: String,
+    quickTimes: List<QuickTime>,
+    onBack: () -> Unit,
+    onQuickTime: (at: String) -> Unit,
+    onOtherTime: () -> Unit,
+) {
+    SheetHeader(title = "Repeat", todoText = todoText, onBack = onBack)
+    Column(
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp)
+    ) {
+        RepeatSection(label = "Every") {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                (1..7).forEach { count ->
+                    ChoiceButton(
+                        label = count.toString(),
+                        selected = draft.every == count,
+                        onClick = { onDraftChange(draft.copy(every = count)) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                    )
+                }
+            }
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                RepeatUnit.entries.forEachIndexed { index, unit ->
+                    SegmentedButton(
+                        selected = draft.unit == unit,
+                        onClick = { onDraftChange(draft.copy(unit = unit)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = RepeatUnit.entries.size),
+                    ) {
+                        Text(if (draft.every > 1) "${unit.wire}s" else unit.wire)
+                    }
+                }
+            }
+        }
+        when (draft.unit) {
+            RepeatUnit.WEEK -> RepeatSection(label = "On") {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    WEEKDAY_NAMES.forEachIndexed { index, name ->
+                        val isoDay = index + 1
+                        ChoiceButton(
+                            label = name.take(1),
+                            description = name,
+                            selected = isoDay == draft.weekday,
+                            onClick = { onDraftChange(draft.copy(weekday = isoDay)) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                        )
+                    }
+                }
+            }
+
+            RepeatUnit.MONTH -> RepeatSection(label = "On") {
+                val rows = (1..28).chunked(7) + listOf(listOf(29, 30, 31, Repeat.LAST_DAY))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    rows.forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+                            row.forEach { day ->
+                                val last = day == Repeat.LAST_DAY
+                                ChoiceButton(
+                                    label = if (last) "Last day" else day.toString(),
+                                    selected = draft.monthDay == day,
+                                    bordered = last,
+                                    onClick = { onDraftChange(draft.copy(monthDay = day)) },
+                                    modifier = Modifier
+                                        .weight(if (last) 4f else 1f)
+                                        .height(40.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            RepeatUnit.DAY -> Unit
+        }
+        RepeatSection(label = "At") {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                quickTimes.forEach { quickTime ->
+                    val at = clockText(quickTime.clockMinutes)
+                    OutlinedButton(
+                        onClick = { onQuickTime(at) },
+                        shape = MaterialTheme.shapes.small,
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        val timeStyle = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
+                        Text(
+                            at,
+                            style = timeStyle,
+                            maxLines = 1,
+                            autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = timeStyle.fontSize),
+                        )
+                    }
+                }
+                if (quickTimes.isEmpty()) Box(Modifier.weight(1f))
+                TextButton(onClick = onOtherTime) {
+                    Text("Other time")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RepeatSection(label: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.semantics { heading() },
+        )
+        content()
+    }
+}
+
+@Composable
+private fun ChoiceButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    description: String? = null,
+    bordered: Boolean = true,
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    Surface(
+        selected = selected,
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (selected) colorScheme.primary else Color.Transparent,
+        contentColor = if (selected) colorScheme.onPrimary else colorScheme.onSurfaceVariant,
+        border = if (selected || !bordered) null else BorderStroke(1.dp, colorScheme.outlineVariant),
+        modifier = modifier.semantics { if (description != null) contentDescription = description },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RepeatTimeStep(
+    at: String,
+    todoText: String,
+    onBack: () -> Unit,
+    onSave: (at: String) -> Unit,
+) {
+    val initialTime = remember(at) { LocalTime.parse(at) }
+    val timePickerState = rememberTimePickerState(
+        initialHour = initialTime.hour,
+        initialMinute = initialTime.minute,
+        is24Hour = true
+    )
+    SheetHeader(title = "Pick a time", todoText = todoText, onBack = onBack)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        TimePicker(state = timePickerState)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Button(onClick = { onSave(LocalTime.of(timePickerState.hour, timePickerState.minute).toString()) }) {
+                Text("Save")
+            }
+        }
+    }
+}
+
+@Composable
 private fun MenuRowItem(
     row: MenuRow,
+    repeat: Repeat?,
     now: Instant,
     zone: ZoneId,
     onClick: () -> Unit
@@ -369,6 +635,7 @@ private fun MenuRowItem(
         is MenuRow.Last -> SnoozeSuggestions.lastText(row.epochMillis, now, zone) to
             SnoozeSuggestions.formatClock(row.epochMillis, zone)
         is MenuRow.Custom -> "Pick a date & time" to null
+        is MenuRow.Repeat -> (repeat?.text() ?: "Repeat…") to null
     }
     val (tile, ink) = when (row) {
         is MenuRow.Suggestion -> colorScheme.tertiaryContainer to colorScheme.onTertiaryContainer
@@ -425,6 +692,7 @@ private fun MenuRow.icon(now: Instant, zone: ZoneId): ImageVector = when (this) 
     }
     is MenuRow.Last -> Icons.Rounded.History
     is MenuRow.Custom -> Icons.Rounded.CalendarMonth
+    is MenuRow.Repeat -> Icons.Rounded.Repeat
 }
 
 @Preview(showBackground = true, name = "Empty - no history yet")
@@ -469,6 +737,6 @@ private fun SnoozeOptionsPreviewContent(
             .background(Color.Transparent)
             .padding(vertical = 16.dp)
     ) {
-        MenuStep(rows = rows, todoText = "Email Sam about the lease renewal", now = now, zone = zone, onRow = {})
+        MenuStep(rows = rows, todoText = "Email Sam about the lease renewal", repeat = null, now = now, zone = zone, onRow = {})
     }
 }
