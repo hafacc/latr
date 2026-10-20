@@ -5,6 +5,7 @@ import Search from "@lucide/svelte/icons/search";
 import AccountButton from "./account-button.svelte";
 import ClearAllButton from "./clear-all-button.svelte";
 import SyncPill from "./sync-pill.svelte";
+import TagInput from "./tag-input.svelte";
 
 let {
   title,
@@ -43,8 +44,8 @@ const open = $derived(searching || search.length > 0);
       <ArrowLeft class="w-5 h-5" />
     </button>
     <!-- Focused as it appears: the field only exists because the user just tapped search. -->
-    <input
-      {@attach (node) => node.focus()}
+    <TagInput
+      attach={(node) => node.focus()}
       type="search"
       value={search}
       oninput={(e) => onSearch(e.currentTarget.value)}
@@ -56,8 +57,9 @@ const open = $derived(searching || search.length > 0);
       }}
       placeholder="Search"
       aria-label="Search todos"
-      class="flex-1 min-w-0 h-10 px-3 rounded-[10px] bg-surface-muted outline-none text-[16px] text-text placeholder:text-text-secondary"
-    >
+      class="flex-1 min-w-0 h-10 rounded-[10px] bg-surface-muted"
+      textClass="px-3 text-[16px]"
+    />
   {:else}
     <h1 class="m-0 text-[22px] leading-7 font-semibold tracking-[-0.01em]">
       {title}
