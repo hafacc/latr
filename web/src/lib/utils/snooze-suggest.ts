@@ -1025,14 +1025,14 @@ export function dayPhraseOf(
   const weekday = isoDow(targetDay);
   const fam = familyOf(dateRule);
   let phrase: DayPhrase;
-  if (fam === "Dom" || fam === "DomL" || fam === "Mo") phrase = "calendar";
+  if (dist === 1) phrase = "tomorrow";
+  else if (fam === "Dom" || fam === "DomL" || fam === "Mo") phrase = "calendar";
   else if (dist === 0) phrase = "today";
   else if (fam === "Wd" || fam === "Wn") {
     if (dist <= 6) phrase = "this";
     else if (dist <= 13) phrase = "next";
     else phrase = "inTwoWeeks";
-  } else if (dist === 1) phrase = "tomorrow";
-  else if (dist <= 6) phrase = "this";
+  } else if (dist <= 6) phrase = "this";
   else if (dist <= 13) phrase = "next";
   else if (dist % 7 === 0 && dist <= 28) phrase = "inWeeks";
   else phrase = "inDays";
