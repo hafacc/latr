@@ -1,6 +1,13 @@
 import { Timestamp } from "firebase/firestore";
 import { plainText } from "./inline-style";
 import { idKey, readPosition, timeKey } from "./position";
+import {
+  anchorRepeat,
+  nextOccurrence,
+  type Repeat,
+  type RepeatDraft,
+  readRepeat,
+} from "./repeat";
 
 export type TodoState = "ACTIVE" | "DONE";
 
@@ -16,6 +23,12 @@ export type Todo = {
   /** Where a move put the row; null orders it by its time. */
   position: string | null;
   deleted: boolean;
+  /** How the todo comes back once done; null for a one-off. */
+  repeat: Repeat | null;
+  /** True once marking this one done has made its next copy. */
+  repeatSpawned: boolean;
+  /** The scheduled local time this copy of a repeating todo stands for. */
+  occurrence: string | null;
 };
 
 export const FILTERS = ["ACTIVE", "SNOOZED", "DONE", "ALL"] as const;
@@ -34,6 +47,9 @@ export function newTodo(text = ""): Todo {
     pinned: false,
     position: null,
     deleted: false,
+    repeat: null,
+    repeatSpawned: false,
+    occurrence: null,
   };
 }
 
@@ -47,6 +63,9 @@ export function toFirestoreFields(t: Todo): Record<string, unknown> {
     pinned: t.pinned,
     position: t.position,
     deleted: t.deleted,
+    repeat: t.repeat,
+    repeatSpawned: t.repeatSpawned,
+    occurrence: t.occurrence,
   };
 }
 
@@ -75,7 +94,18 @@ export function fromFirestore(id: string, data: Record<string, unknown>): Todo {
     pinned: data.pinned === true,
     position: readPosition(data.position),
     deleted: data.deleted === true,
+    repeat: readRepeat(data.repeat),
+    repeatSpawned: data.repeatSpawned === true,
+    occurrence: readOccurrence(data.occurrence),
   };
+}
+
+/** A saved occurrence, or null when it isn't a local `YYYY-MM-DDTHH:mm:ss`. */
+export function readOccurrence(value: unknown): string | null {
+  return typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)
+    ? value
+    : null;
 }
 
 /** Legacy rows carry state "SNOOZED"; snoozeUntil is the only snooze marker now. */
@@ -138,6 +168,73 @@ export function withPinToggled(t: Todo, now: number): Todo {
     return { ...t, pinned, position: null, modifiedAt: now };
   } else {
     return { ...t, pinned, position: null, snoozeUntil: null, modifiedAt: now };
+  }
+}
+
+/** A todo marked done at `now`, and the next copy it makes if it repeats and hasn't made one yet. */
+export function withDone(
+  t: Todo,
+  now: number,
+  newId: string,
+): { done: Todo; spawned: Todo | null } {
+  const done: Todo = {
+    ...t,
+    state: "DONE",
+    snoozeUntil: null,
+    position: null,
+    modifiedAt: now,
+  };
+  if (t.repeat === null || t.repeatSpawned) {
+    return { done, spawned: null };
+  } else {
+    const nowIso = epochToIso(now);
+    const after =
+      t.occurrence !== null && t.occurrence > nowIso ? t.occurrence : nowIso;
+    const next = nextOccurrence(t.repeat, after);
+    return {
+      done: { ...done, repeatSpawned: true },
+      spawned: {
+        id: newId,
+        text: t.text,
+        state: "ACTIVE",
+        createdAt: now,
+        modifiedAt: now,
+        serverModifiedAt: null,
+        snoozeUntil: next,
+        pinned: t.pinned,
+        position: null,
+        deleted: false,
+        repeat: t.repeat,
+        repeatSpawned: false,
+        occurrence: next,
+      },
+    };
+  }
+}
+
+/** A todo given the rule `draft` at `now`; its snooze, place and copies are left alone. */
+export function withRepeat(t: Todo, draft: RepeatDraft, now: number): Todo {
+  return { ...t, repeat: anchorRepeat(draft, epochToIso(now)) };
+}
+
+/** A done or snoozed todo made active at `now`; unsnoozing one also stops it repeating. */
+export function withReactivated(t: Todo, now: number): Todo {
+  const reactivated: Todo = {
+    ...t,
+    state: "ACTIVE",
+    snoozeUntil: null,
+    position: null,
+    modifiedAt: now,
+  };
+  if (isSnoozed(t, now)) {
+    return {
+      ...reactivated,
+      repeat: null,
+      repeatSpawned: false,
+      occurrence: null,
+    };
+  } else {
+    return reactivated;
   }
 }
 

@@ -69,6 +69,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
@@ -151,6 +152,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import cc.hafa.latr.data.Todo
 import cc.hafa.latr.data.TodoState
+import cc.hafa.latr.data.restored
 import cc.hafa.latr.ui.auth.AccountBottomSheet
 import cc.hafa.latr.ui.auth.AuthManager
 import cc.hafa.latr.ui.auth.AuthState
@@ -566,8 +568,12 @@ fun TodoScreen(
                     viewModel.snoozeUndoable(todo, isoDateTime, source, pickedKey, pickLogKey)
                 } ?: false
             },
+            onRepeatSaved = { repeat ->
+                todoToSnooze?.let { todo -> viewModel.setRepeat(todo, repeat) }
+            },
             partitions = snoozePartitions,
             todoText = todoToSnooze?.text.orEmpty(),
+            repeat = todoToSnooze?.repeat,
         )
     }
 
@@ -1155,10 +1161,7 @@ fun TodoItem(
 
                 SwipeToDismissBoxValue.StartToEnd ->
                     if (done || currentSnoozed) {
-                        currentOnUpdate(
-                            currentTodo.copy(state = TodoState.ACTIVE, snoozeUntil = null),
-                            true,
-                        )
+                        currentOnUpdate(currentTodo.restored(currentSnoozed), true)
                     } else {
                         currentOnSnooze()
                     }
@@ -1253,7 +1256,7 @@ fun TodoItem(
                 .semantics {
                     val done = todo.state == TodoState.DONE
                     val restore = CustomAccessibilityAction("Restore") {
-                        currentOnUpdate(currentTodo.copy(state = TodoState.ACTIVE, snoozeUntil = null), true)
+                        currentOnUpdate(currentTodo.restored(currentSnoozed), true)
                         true
                     }
                     customActions = if (done) {
@@ -1437,6 +1440,26 @@ fun TodoItem(
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (snoozed) colorScheme.tertiary else colorScheme.onSurfaceVariant
                     )
+                }
+                val repeat = todo.repeat
+                if (repeat != null && todo.state != TodoState.DONE) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 2.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Repeat,
+                            contentDescription = null,
+                            tint = colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = remember(repeat) { repeat.text() },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

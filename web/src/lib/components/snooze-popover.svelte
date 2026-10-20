@@ -1,11 +1,16 @@
 <script lang="ts">
+import type { Repeat, RepeatDraft } from "../utils/repeat";
 import type { SnoozeSource } from "../utils/snooze-suggest";
 import SnoozeMenu from "./snooze-menu.svelte";
 
 let {
+  repeat,
   onPick,
+  onRepeat,
   onClose,
 }: {
+  repeat: Repeat | null;
+  onRepeat: (draft: RepeatDraft) => void;
   onPick: (
     epochMillis: number,
     source: SnoozeSource,
@@ -63,5 +68,5 @@ $effect(() => {
   tabindex="-1"
   aria-label="Snooze until"
 >
-  <SnoozeMenu {onPick} />
+  <SnoozeMenu {repeat} {onPick} {onRepeat} />
 </div>

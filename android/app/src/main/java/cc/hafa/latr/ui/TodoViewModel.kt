@@ -9,6 +9,10 @@ import cc.hafa.latr.data.SnoozeUndo
 import cc.hafa.latr.data.Todo
 import cc.hafa.latr.data.TodoState
 import cc.hafa.latr.data.TodoStoreHolder
+import cc.hafa.latr.data.completed
+import cc.hafa.latr.data.undoCompletion
+import cc.hafa.latr.data.write
+import cc.hafa.latr.util.Repeat
 import cc.hafa.latr.util.LocalDateTimeUtil
 import cc.hafa.latr.util.SnoozeStatsSnapshot
 import kotlin.time.Duration.Companion.seconds
@@ -45,7 +49,8 @@ class TodoViewModel(
     private sealed interface UndoableAction {
         data class Delete(val todos: List<Todo>) : UndoableAction
         data class Snooze(val previous: Todo, val statsUndo: SnoozeUndo) : UndoableAction
-        data class Complete(val previous: Todo) : UndoableAction
+        /** [spawned] is the next copy a repeating todo made; undo deletes it. */
+        data class Complete(val previous: Todo, val spawned: Todo?) : UndoableAction
     }
 
     private var _lastAction: UndoableAction? = null
@@ -125,12 +130,15 @@ class TodoViewModel(
     }
 
     fun completeUndoable(todo: Todo) {
-        _lastAction = UndoableAction.Complete(todo)
+        val completion = todo.completed(System.currentTimeMillis())
+        _lastAction = UndoableAction.Complete(todo, completion.spawned)
         armUndo()
-        updateTodo(
-            todo.copy(state = TodoState.DONE, snoozeUntil = null),
-            touchModifiedAt = true
-        )
+        viewModelScope.launch { currentStore().write(completion) }
+    }
+
+    /** Save [repeat] on [todo]; like a text edit, it leaves the row where it is. */
+    fun setRepeat(todo: Todo, repeat: Repeat) {
+        updateTodo(todo.copy(repeat = repeat), touchModifiedAt = false)
     }
 
     /** [source] is "suggestion", "last", or "custom"; [pickedKey] is the suggestion row's key. False if [snoozeUntil] has passed. */
@@ -247,7 +255,7 @@ class TodoViewModel(
                 }
             is UndoableAction.Complete ->
                 viewModelScope.launch {
-                    currentStore().update(action.previous)
+                    currentStore().undoCompletion(action.previous, action.spawned)
                 }
             null -> {}
         }
