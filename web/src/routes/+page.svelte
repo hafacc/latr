@@ -94,16 +94,20 @@ function onArrowKey(e: KeyboardEvent) {
     return;
   }
 
-  // Inside a todo row's editor: only hand off to row-nav when the caret
-  // has no logical newline in the direction of travel.
+  // Inside a todo row's editor: only hand off to row-nav when the caret is
+  // already on the first (or last) visual line, counting wrapped lines.
   if (!target) return;
   const view = EditorView.findFromDOM(target);
   if (!view) return;
-  const { from, to } = view.state.selection.main;
+  const { from, to, assoc } = view.state.selection.main;
   if (e.key === "ArrowUp") {
-    if (view.state.doc.sliceString(0, from).includes("\n")) return;
-  } else if (view.state.doc.sliceString(to).includes("\n")) {
-    return;
+    const caret = view.coordsAtPos(from, assoc || 1);
+    const first = view.coordsAtPos(0, 1);
+    if (caret && first && caret.top > first.bottom - 1) return;
+  } else {
+    const caret = view.coordsAtPos(to, assoc || -1);
+    const last = view.coordsAtPos(view.state.doc.length, -1);
+    if (caret && last && caret.bottom < last.top + 1) return;
   }
   const index = rows.indexOf(row);
   const nextIndex = e.key === "ArrowUp" ? index - 1 : index + 1;
@@ -151,12 +155,12 @@ function onUndoKey(e: KeyboardEvent) {
 
 function onKey(e: KeyboardEvent) {
   onSearchKey(e);
-  onArrowKey(e);
 }
 
 function onCaptureKey(e: KeyboardEvent) {
   onShortcutKey(e);
   onUndoKey(e);
+  onArrowKey(e);
 }
 
 function composeNew() {
