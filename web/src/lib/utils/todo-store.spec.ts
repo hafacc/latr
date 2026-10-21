@@ -78,6 +78,8 @@ describe("LocalTodoStore", () => {
     expect(
       store.getWithTombstones().find((t) => t.id === "copy")?.deleted,
     ).toBe(true);
+    // An unsaved write would fire after afterAll removes localStorage.
+    store.flush();
   });
 });
 
