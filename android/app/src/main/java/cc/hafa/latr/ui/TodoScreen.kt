@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,6 +51,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
@@ -91,6 +94,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -163,6 +167,7 @@ import cc.hafa.latr.ui.auth.photoUrl
 import cc.hafa.latr.ui.auth.rememberAuthState
 import cc.hafa.latr.ui.theme.LatrTheme
 import cc.hafa.latr.util.LocalDateTimeUtil
+import cc.hafa.latr.util.Tags
 import kotlin.math.abs
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
@@ -684,6 +689,9 @@ fun TodoScreenContent(
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val tagCounts = remember(todos) { Tags.count(todos.orEmpty().map { it.text }) }
+    // Keyed by the todo offering them, so a row closing can't clear the next row's.
+    var tagSuggestions by remember { mutableStateOf<Pair<String, TagSuggestions>?>(null) }
     val hapticFeedback = LocalHapticFeedback.current
     val pullToRefreshState = rememberPullToRefreshState()
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -834,6 +842,8 @@ fun TodoScreenContent(
             }
         },
         bottomBar = {
+            val offeredTags = tagSuggestions?.second
+            Column {
             Column(
                 modifier = Modifier
                     .navigationBarsPadding()
@@ -887,6 +897,10 @@ fun TodoScreenContent(
                         Icon(Icons.Rounded.Add, contentDescription = "Add todo")
                     }
                 }
+            }
+            if (offeredTags != null && imeVisible) {
+                TagBar(offeredTags)
+            }
             }
         }
     ) { innerPadding ->
@@ -1012,6 +1026,14 @@ fun TodoScreenContent(
                                                 }
                                             },
                                             onCreateNewTodo = onCreateTodo,
+                                            tagCounts = tagCounts,
+                                            onTagSuggestions = { offer ->
+                                                if (offer != null) {
+                                                    tagSuggestions = todo.id to offer
+                                                } else if (tagSuggestions?.first == todo.id) {
+                                                    tagSuggestions = null
+                                                }
+                                            },
                                             modifier = Modifier.animateItem()
                                         )
                                     }
@@ -1023,6 +1045,50 @@ fun TodoScreenContent(
             }
             }
         }
+        }
+    }
+}
+
+/** Tags to offer while one is typed, and what picking one does. */
+class TagSuggestions(val names: List<String>, val pick: (String) -> Unit)
+
+/** A strip on top of the keyboard offering known tags, in place of the filter bar. */
+@Composable
+private fun TagBar(suggestions: TagSuggestions) {
+    val hapticFeedback = LocalHapticFeedback.current
+    val tagColor = MaterialTheme.colorScheme.primary
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .height(48.dp)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp)
+        ) {
+            for (name in suggestions.names) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        // Taking focus would close the editor being typed in.
+                        .focusProperties { canFocus = false }
+                        .clickable {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            suggestions.pick(name)
+                        }
+                        .padding(horizontal = 6.dp)
+                ) {
+                    Text(
+                        "#$name",
+                        color = tagColor,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .background(tagColor.copy(alpha = TAG_CHIP_ALPHA), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 2.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -1055,6 +1121,10 @@ fun TodoItem(
     // Null disables pinning (passed for every row but a done one).
     onTogglePin: (() -> Unit)? = null,
     onCreateNewTodo: () -> Unit,
+    // Every tag in use, offered while one is typed.
+    tagCounts: Map<String, Tags.Known> = emptyMap(),
+    // Receives the tags to offer above the keyboard, or null when there are none.
+    onTagSuggestions: (TagSuggestions?) -> Unit = {},
 ) {
     // At rest the row is a plain Text; tapping swaps in the editor (`editing` gates it).
     var editing by remember(todo.id) { mutableStateOf(false) }
@@ -1321,31 +1391,32 @@ fun TodoItem(
             )
             Column(modifier = Modifier.weight(1f)) {
                 if (editing) {
+                    val applyEdit: (TextFieldValue) -> Unit = { newValue ->
+                        if (!newValue.text.contains('\n')) {
+                            fieldValue = newValue
+                            // Only a plainly-active row drops its was-snoozed marker;
+                            // clearing it on a snoozed row would unsnooze it.
+                            val plainlyActive =
+                                currentTodo.state != TodoState.DONE && !currentSnoozed
+                            val wasSnoozeUntil = currentTodo.snoozeUntil
+                            val edited = if (plainlyActive && wasSnoozeUntil != null) {
+                                // Pin modifiedAt to the old unsnooze time so dropping
+                                // snoozeUntil doesn't sink the row to a stale modifiedAt.
+                                currentTodo.copy(
+                                    text = newValue.text,
+                                    snoozeUntil = null,
+                                    position = null,
+                                    modifiedAt = LocalDateTimeUtil.toEpochMillis(wasSnoozeUntil)
+                                )
+                            } else {
+                                currentTodo.copy(text = newValue.text)
+                            }
+                            currentOnUpdate(edited, false)
+                        }
+                    }
                     BasicTextField(
                         value = fieldValue,
-                        onValueChange = { newValue ->
-                            if (!newValue.text.contains('\n')) {
-                                fieldValue = newValue
-                                // Only a plainly-active row drops its was-snoozed marker;
-                                // clearing it on a snoozed row would unsnooze it.
-                                val plainlyActive =
-                                    currentTodo.state != TodoState.DONE && !currentSnoozed
-                                val wasSnoozeUntil = currentTodo.snoozeUntil
-                                val edited = if (plainlyActive && wasSnoozeUntil != null) {
-                                    // Pin modifiedAt to the old unsnooze time so dropping
-                                    // snoozeUntil doesn't sink the row to a stale modifiedAt.
-                                    currentTodo.copy(
-                                        text = newValue.text,
-                                        snoozeUntil = null,
-                                        position = null,
-                                        modifiedAt = LocalDateTimeUtil.toEpochMillis(wasSnoozeUntil)
-                                    )
-                                } else {
-                                    currentTodo.copy(text = newValue.text)
-                                }
-                                currentOnUpdate(edited, false)
-                            }
-                        },
+                        onValueChange = applyEdit,
                         onTextLayout = { editorLayoutResult = it },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1388,6 +1459,32 @@ fun TodoItem(
                             innerTextField()
                         }
                     )
+                    val selection = fieldValue.selection
+                    val typedTag = if (selection.collapsed) Tags.typing(fieldValue.text, selection.start) else null
+                    val suggestedTags = if (typedTag == null) {
+                        emptyList()
+                    } else {
+                        Tags.suggest(tagCounts, todo.text, typedTag.prefix)
+                    }
+                    val currentField by rememberUpdatedState(fieldValue)
+                    val currentApplyEdit by rememberUpdatedState(applyEdit)
+                    DisposableEffect(suggestedTags) {
+                        onTagSuggestions(
+                            if (suggestedTags.isEmpty()) {
+                                null
+                            } else {
+                                TagSuggestions(suggestedTags) { name ->
+                                    val field = currentField
+                                    val caret = field.selection.start
+                                    Tags.typing(field.text, caret)?.let { typed ->
+                                        val (completed, newCaret) = Tags.complete(field.text, typed, caret, name)
+                                        currentApplyEdit(TextFieldValue(completed, TextRange(newCaret)))
+                                    }
+                                }
+                            }
+                        )
+                        onDispose { onTagSuggestions(null) }
+                    }
                 } else {
                     // Passively record the tap's caret offset (Initial pass, no consume) so onClick opens there.
                     Text(
