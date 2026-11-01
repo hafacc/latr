@@ -319,10 +319,7 @@ const empty = $derived<EmptyCopy>(
 );
 </script>
 
-{#snippet row(
-  todo: Todo,
-  canMove: boolean,
-)}
+{#snippet row(todo: Todo, canMove: boolean)}
   <TodoRow
     {todo}
     movable={canMove}
