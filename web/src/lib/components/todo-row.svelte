@@ -158,9 +158,15 @@ $effect(() => {
     row?.scrollIntoView({ block: "nearest" });
     const pending = pendingCaret;
     pendingCaret = null;
-    handle.focus(
-      (pending && handle.posAtCoords(pending.x, pending.y)) ?? "end",
-    );
+    const hint = app.caretHint?.id === todo.id ? app.caretHint : null;
+    app.caretHint = null;
+    if (hint && !pending) {
+      handle.focusAtEdge(hint.x, hint.edge);
+    } else {
+      handle.focus(
+        (pending && handle.posAtCoords(pending.x, pending.y)) ?? "end",
+      );
+    }
   });
   // The on-screen keyboard shrinks the viewport after focus; keep the row clear of the dock.
   const onResize = () => row?.scrollIntoView({ block: "nearest" });

@@ -99,7 +99,7 @@ function onArrowKey(e: KeyboardEvent) {
   if (!target) return;
   const view = EditorView.findFromDOM(target);
   if (!view) return;
-  const { from, to, assoc } = view.state.selection.main;
+  const { from, to, assoc, head, goalColumn } = view.state.selection.main;
   if (e.key === "ArrowUp") {
     const caret = view.coordsAtPos(from, assoc || 1);
     const first = view.coordsAtPos(0, 1);
@@ -114,7 +114,13 @@ function onArrowKey(e: KeyboardEvent) {
   if (nextIndex < 0 || nextIndex >= rows.length) return;
   const id = rows[nextIndex].getAttribute("data-todo-id");
   if (id) {
-    app.setFocus(id);
+    const left = view.contentDOM.getBoundingClientRect().left;
+    // CodeMirror keeps the column a run of up/down presses started from.
+    const x =
+      goalColumn !== undefined
+        ? left + goalColumn
+        : (view.coordsAtPos(head, assoc || 1)?.left ?? left);
+    app.focusFromArrow(id, x, e.key === "ArrowUp" ? "last" : "first");
     e.preventDefault();
   }
 }
