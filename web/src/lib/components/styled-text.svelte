@@ -6,9 +6,7 @@ let { text }: { text: string } = $props();
 </script>
 
 <!-- Spans with the editor's classes, not <strong>/<em>, so a row looks the same at rest and while editing. -->
-{#snippet render(
-  nodes: StyledNode[],
-)}
+{#snippet render(nodes: StyledNode[])}
   {#each nodes as node, index (index)}
     {#if node.kind === "text"}
       {node.text}
