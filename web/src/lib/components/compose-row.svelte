@@ -1,6 +1,7 @@
 <script lang="ts">
 import { getAppState } from "../utils/app-state.svelte";
 import { hasModifier, isEditableTarget } from "../utils/keyboard";
+import { suggestTags } from "../utils/tags";
 import type { TextEditorHandle } from "./text-editor";
 import TextEditor from "./text-editor.svelte";
 
@@ -77,6 +78,8 @@ function submit() {
       focused = false;
     }}
     onEnter={submit}
+    tagSuggestions={(prefix) => suggestTags(app.tagCounts, "", prefix)}
+    onTagOffer={app.offerTags}
     enterKeyHint={draft.trim().length === 0 ? "done" : "next"}
     placeholder="Add a todo…"
     ariaLabel="Add a todo"
