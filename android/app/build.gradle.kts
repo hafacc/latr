@@ -77,9 +77,14 @@ android {
         disable += setOf("OldTargetApi", "GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable")
     }
     sourceSets {
+        getByName("main") {
+            // Info page text, shared with web.
+            assets.directories.add("../../content")
+        }
         getByName("test") {
             // Shared with web: web/utils/*.spec.ts read the same fixture.
             resources.directories.add("../../testdata")
+            resources.directories.add("../../content")
         }
     }
 }

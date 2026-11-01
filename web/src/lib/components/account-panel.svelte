@@ -3,15 +3,17 @@
 import ChartColumn from "@lucide/svelte/icons/chart-column";
 import Download from "@lucide/svelte/icons/download";
 import LogOut from "@lucide/svelte/icons/log-out";
+import MessageSquare from "@lucide/svelte/icons/message-square";
 import Shield from "@lucide/svelte/icons/shield";
 import Trash2 from "@lucide/svelte/icons/trash-2";
-import { resolve } from "$app/paths";
 import { getAppState } from "../utils/app-state.svelte";
 import { getAuthState } from "../utils/auth.svelte";
+import { FEEDBACK_URL, PRIVACY } from "../utils/info-pages";
 import { getPwaState } from "../utils/pwa.svelte";
 import Avatar from "./avatar.svelte";
 import ConfirmDialog from "./confirm-dialog.svelte";
 import GoogleMark from "./google-mark.svelte";
+import InfoWindow from "./info-window.svelte";
 import StatsWindow from "./stats-window.svelte";
 import ThemeSegmented from "./theme-segmented.svelte";
 
@@ -33,6 +35,7 @@ let unsynced = $state(false);
 let showInstallSteps = $state(false);
 let admin = $state(false);
 let statsOpen = $state(false);
+let privacyOpen = $state(false);
 
 $effect(() => {
   const { user } = auth;
@@ -94,10 +97,29 @@ $effect(() => {
       {/if}
     </div>
   {/if}
-  <a href={resolve("privacy/")} class={row}>
+  <button
+    type="button"
+    onclick={() => {
+      privacyOpen = true;
+    }}
+    class={row}
+  >
     <Shield class="w-4 h-4 text-text-secondary" />
     Privacy
+  </button>
+  <a href={FEEDBACK_URL} target="_blank" rel="noopener" class={row}>
+    <MessageSquare class="w-4 h-4 text-text-secondary" />
+    Feedback
   </a>
+  {#if privacyOpen}
+    <InfoWindow
+      page={PRIVACY}
+      path="privacy/"
+      onClose={() => {
+        privacyOpen = false;
+      }}
+    />
+  {/if}
   {#if auth.user}
     <button
       type="button"

@@ -1,0 +1,26 @@
+{
+  "title": "Privacy",
+  "sections": [
+    {
+      "heading": "Not signed in",
+      "body": "Your todos stay on your device. Nothing is sent anywhere."
+    },
+    {
+      "heading": "Signed in with Google",
+      "body": "Your todos and a count of the snooze times you pick are stored in Google Firebase under your Google account, so they sync between your devices. Google gives Latr your name, email and profile photo, shown in the account menu. Other users can't read your data. Signing out removes it from the device you sign out on."
+    },
+    {
+      "heading": "Improve snooze suggestions",
+      "body": "Off unless you turn it on. Each snooze then adds one to a shared tally of which menu position was picked. It holds no todo text, no times, and nothing that identifies you."
+    },
+    {
+      "heading": "What Latr doesn't do",
+      "body": "No ads, no analytics, no selling or sharing of data. Google handles sign-in and storage."
+    },
+    {
+      "heading": "Delete your account",
+      "body": "Use the [delete account page](delete-account/), or open Latr on the web or on Android, open the account menu, and choose Delete account. Your todos, snooze counts and account are removed right away."
+    }
+  ],
+  "closing": "Deleting a single todo erases its text."
+}
