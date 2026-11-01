@@ -17,9 +17,11 @@ $effect(() => {
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") open = false;
   }
-  // A collapsed sidebar shrinks back when the pointer leaves it; close with it.
+  // A collapsed sidebar shrinks back when the pointer leaves it; close with it,
+  // unless the pointer left for a window the menu opened (Privacy, Stats).
   const sidebar = root.closest("aside");
   function onLeave() {
+    if (root.querySelector("dialog[open]")) return;
     if (sidebar?.dataset.collapsed === "true") open = false;
   }
   document.addEventListener("mousedown", onDoc);
