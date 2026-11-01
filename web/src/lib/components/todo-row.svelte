@@ -24,6 +24,7 @@ import {
   startsAtEdge,
   swipeAction,
 } from "../utils/swipe";
+import { suggestTags } from "../utils/tags";
 import { isoToEpoch, isSnoozed, type Todo } from "../utils/todo";
 import type { IconType } from "./filters";
 import Hint from "./hint.svelte";
@@ -177,7 +178,8 @@ $effect(() => {
 $effect(() => {
   if (!focused) return;
   function onBlurKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    // The editor already took it, e.g. to close the tag dropdown.
+    if (e.key === "Escape" && !e.defaultPrevented) {
       (document.activeElement as HTMLElement | null)?.blur();
     }
   }
@@ -487,6 +489,9 @@ function closeSnooze() {
             }}
             onBlur={onEditorBlur}
             onEnter={(view) => view.contentDOM.blur()}
+            tagSuggestions={(prefix) =>
+              suggestTags(app.tagCounts, todo.text, prefix)}
+            onTagOffer={app.offerTags}
             multiline
             ariaLabel="Todo"
             class={[

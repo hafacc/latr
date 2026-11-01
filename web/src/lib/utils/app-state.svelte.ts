@@ -1,4 +1,5 @@
 import { createContext } from "svelte";
+import type { TagOffer } from "../components/text-editor";
 import type { RepeatDraft } from "./repeat";
 import type { DevicePartition, SnoozeSource } from "./snooze-suggest";
 import {
@@ -16,6 +17,7 @@ import {
   undoWrites,
 } from "./store";
 import { TodoStoreHolder } from "./store-holder";
+import { countTags } from "./tags";
 import {
   epochToIso,
   type Filter,
@@ -39,6 +41,15 @@ export class AppState {
   now = $state(Date.now());
   todos = $state.raw<Todo[]>([]);
   syncing = $state(false);
+  // The bar above a phone's keyboard shows these while a tag is typed.
+  tagOffer = $state.raw<TagOffer | null>(null);
+
+  /** Show an editor's tag offer, or clear it if `previous` (its last one) is still showing. */
+  offerTags = (offer: TagOffer | null, previous: TagOffer | null): void => {
+    if (offer || this.tagOffer === previous) this.tagOffer = offer;
+  };
+  // Every tag in use, for completing one as it's typed.
+  readonly tagCounts = $derived(countTags(this.todos.map((todo) => todo.text)));
   snoozePickLog = $state(false);
   #ui = $state.raw<UiState>(initialUi);
   #partitions = $state.raw<DevicePartition[]>([]);

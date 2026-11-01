@@ -21,7 +21,8 @@ import cc.hafa.latr.util.InlineStyle
 import cc.hafa.latr.util.Tags
 
 private const val MARKER_ALPHA = 0.45f
-private const val CHIP_ALPHA = 0.12f
+/** Opacity of the tint behind a `#tag`. */
+internal const val TAG_CHIP_ALPHA = 0.12f
 
 /**
  * [text] with its `*bold*` / `_italic_` spans styled, their markers dimmed relative to [baseColor],
@@ -74,7 +75,7 @@ fun Modifier.tagChips(text: String, layout: () -> TextLayoutResult?, tagColor: C
     if (result.layoutInput.text.text != text || result.size.width > size.width) return@drawBehind
     val pad = 2.dp.toPx()
     val radius = CornerRadius(4.dp.toPx())
-    val chip = tagColor.copy(alpha = tagColor.alpha * CHIP_ALPHA)
+    val chip = tagColor.copy(alpha = tagColor.alpha * TAG_CHIP_ALPHA)
     for (tag in Tags.parse(text)) {
         var box: Rect? = null
         var boxLine = -1

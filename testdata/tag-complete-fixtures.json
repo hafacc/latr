@@ -1,0 +1,93 @@
+{
+  "_doc": {
+    "typing": "The tag the caret ends: [start of its '#', name typed so far], or null. caret is a UTF-16 offset.",
+    "suggest": "Known tags from texts (each text counts a tag once, first spelling kept), leaving out every tag own already has, filtered by prefix ignoring case, the exact name left out, most used first then by lowercased name, at most limit.",
+    "complete": "The text after picking name, and the caret: the typed tag becomes '#name' plus one space (an existing space after the caret is reused)."
+  },
+  "typing": [
+    { "name": "bare hash", "in": "buy #", "caret": 5, "out": [4, ""] },
+    { "name": "partial name", "in": "buy #wo", "caret": 7, "out": [4, "wo"] },
+    { "name": "at the start", "in": "#ho", "caret": 3, "out": [0, "ho"] },
+    { "name": "after an opener", "in": "(#ho", "caret": 4, "out": [1, "ho"] },
+    { "name": "followed by a space", "in": "#ho milk", "caret": 3, "out": [0, "ho"] },
+    { "name": "caret inside the name", "in": "#home", "caret": 3, "out": null },
+    { "name": "caret before the hash", "in": "a #b", "caret": 2, "out": null },
+    { "name": "letter before the hash", "in": "C#", "caret": 2, "out": null },
+    { "name": "double hash", "in": "##", "caret": 2, "out": null },
+    { "name": "space after the hash", "in": "# a", "caret": 3, "out": null },
+    { "name": "punctuation in between", "in": "#a.b", "caret": 4, "out": null },
+    { "name": "no hash", "in": "milk", "caret": 4, "out": null },
+    { "name": "accented name", "in": "#café", "caret": 5, "out": [0, "café"] }
+  ],
+  "suggest": [
+    {
+      "name": "prefix, most used first",
+      "texts": ["#work a", "#work b", "#weekend c", "#home d"],
+      "own": "",
+      "prefix": "w",
+      "out": ["work", "weekend"]
+    },
+    {
+      "name": "empty prefix lists all",
+      "texts": ["#b", "#a", "#b x"],
+      "own": "",
+      "prefix": "",
+      "out": ["b", "a"]
+    },
+    {
+      "name": "ties by name",
+      "texts": ["#zeta", "#alpha", "#Mid"],
+      "own": "",
+      "prefix": "",
+      "out": ["alpha", "Mid", "zeta"]
+    },
+    {
+      "name": "ignores case, keeps first spelling",
+      "texts": ["#Work", "#work"],
+      "own": "",
+      "prefix": "WO",
+      "out": ["Work"]
+    },
+    {
+      "name": "one text counts a tag once",
+      "texts": ["#a #a #a", "#b", "#b"],
+      "own": "",
+      "prefix": "",
+      "out": ["b", "a"]
+    },
+    {
+      "name": "own half-typed tag left out",
+      "texts": ["buy #wo", "#work"],
+      "own": "buy #wo",
+      "prefix": "wo",
+      "out": ["work"]
+    },
+    {
+      "name": "tags already in own left out",
+      "texts": ["#home #work", "#work", "#weekend"],
+      "own": "#home #work #",
+      "prefix": "",
+      "out": ["weekend"]
+    },
+    {
+      "name": "exact name left out",
+      "texts": ["#work", "#workout"],
+      "own": "",
+      "prefix": "work",
+      "out": ["workout"]
+    },
+    {
+      "name": "limit",
+      "texts": ["#a", "#b", "#c", "#d", "#e", "#f"],
+      "own": "",
+      "prefix": "",
+      "limit": 5,
+      "out": ["a", "b", "c", "d", "e"]
+    }
+  ],
+  "complete": [
+    { "name": "at the end", "in": "buy #wo", "caret": 7, "pick": "work", "out": "buy #work ", "outCaret": 10 },
+    { "name": "before a space", "in": "#ho milk", "caret": 3, "pick": "home", "out": "#home milk", "outCaret": 6 },
+    { "name": "before punctuation", "in": "#ho.", "caret": 3, "pick": "home", "out": "#home .", "outCaret": 6 }
+  ]
+}

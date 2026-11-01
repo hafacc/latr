@@ -19,10 +19,14 @@ import {
   placeholder as placeholderExt,
 } from "@codemirror/view";
 import { onMount } from "svelte";
+import { desktop } from "../utils/media.svelte";
 import {
   inlineStyles,
   singleLine,
+  type TagOffer,
   type TextEditorHandle,
+  tagCompletion,
+  tagOfferAt,
   theme,
   toggleMarker,
 } from "./text-editor";
@@ -37,6 +41,8 @@ let {
   multiline = false,
   placeholder,
   enterKeyHint,
+  tagSuggestions,
+  onTagOffer,
   ariaLabel,
   class: className,
 }: {
@@ -51,6 +57,11 @@ let {
   multiline?: boolean;
   placeholder?: string;
   enterKeyHint?: string;
+  // Known tags matching the name typed after a `#`, offered in a dropdown.
+  tagSuggestions?: (prefix: string) => string[];
+  // On phones the tags go here, for a bar above the keyboard, instead of a dropdown.
+  // `previous` is this editor's last offer, so clearing it leaves another editor's alone.
+  onTagOffer?: (offer: TagOffer | null, previous: TagOffer | null) => void;
   ariaLabel: string;
   class?: string;
 } = $props();
@@ -59,6 +70,18 @@ const external = Annotation.define<boolean>();
 const attrs = new Compartment();
 let host: HTMLDivElement;
 let view: EditorView | null = null;
+let offered: TagOffer | null = null;
+
+function offerTags(target: EditorView) {
+  const offer =
+    !desktop.current && target.hasFocus && tagSuggestions
+      ? tagOfferAt(target, tagSuggestions)
+      : null;
+  if (offer?.names.join("\n") === offered?.names.join("\n")) return;
+  const previous = offered;
+  offered = offer;
+  onTagOffer?.(offer, previous);
+}
 
 function contentAttributes(hint?: string) {
   return EditorView.contentAttributes.of({
@@ -81,6 +104,10 @@ onMount(() => {
       doc: value,
       extensions: [
         history(),
+        // Before the keymap below, so Enter and Escape reach an open dropdown first.
+        tagCompletion((prefix) =>
+          desktop.current ? (tagSuggestions?.(prefix) ?? []) : [],
+        ),
         Prec.highest(
           keymap.of([
             {
@@ -113,6 +140,9 @@ onMount(() => {
         placeholder ? placeholderExt(placeholder) : [],
         attrs.of(contentAttributes(enterKeyHint)),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged || update.selectionSet || update.focusChanged) {
+            offerTags(update.view);
+          }
           if (
             update.docChanged &&
             !update.transactions.some((tr) => tr.annotation(external))
@@ -162,6 +192,7 @@ onMount(() => {
   return () => {
     view = null;
     handle = null;
+    if (offered) onTagOffer?.(null, offered);
     created.destroy();
   };
 });
