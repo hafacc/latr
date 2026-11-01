@@ -40,6 +40,7 @@ Track features and behavior here. When making changes, verify existing behavior 
 - No todo should be focused after pressing back
 - No todo should be focused after the keyboard is dismissed (e.g. swipe down)
 - When a todo gains focus, scroll to it first
+- Web: up/down arrows move through a todo's wrapped lines and only then into the next todo, landing on its nearest line at the same horizontal spot; a run of presses keeps the spot it started from, even through shorter todos (`focusFromArrow` in `utils/app-state.svelte.ts`, `focusAtEdge` on the editor handle)
 - No extra space should appear below the search bar when focusing a todo
 
 ### Undo

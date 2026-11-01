@@ -142,6 +142,22 @@ onMount(() => {
     posAtCoords: (x, y) => created.posAtCoords({ x, y }, false),
     select: (anchor, head) =>
       created.dispatch({ selection: EditorSelection.range(anchor, head) }),
+    focusAtEdge: (x, edge) => {
+      created.focus();
+      const box = created.contentDOM.getBoundingClientRect();
+      const lineMiddle = created.defaultLineHeight / 2;
+      const y =
+        edge === "first" ? box.top + lineMiddle : box.bottom - lineMiddle;
+      const pos =
+        created.posAtCoords({ x, y }, false) ??
+        (edge === "first" ? 0 : created.state.doc.length);
+      // A bare range would be read as {anchor, head}, dropping the column.
+      created.dispatch({
+        selection: EditorSelection.create([
+          EditorSelection.cursor(pos, 0, undefined, x - box.left),
+        ]),
+      });
+    },
   };
   return () => {
     view = null;

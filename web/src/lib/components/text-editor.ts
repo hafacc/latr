@@ -19,6 +19,8 @@ export type TextEditorHandle = {
   // Document offset nearest a viewport point.
   posAtCoords: (x: number, y: number) => number | null;
   select: (anchor: number, head: number) => void;
+  // Focus with the caret on the first or last line, nearest viewport x, keeping x for later up/down moves.
+  focusAtEdge: (x: number, edge: "first" | "last") => void;
 };
 
 const BOLD = Decoration.mark({ class: "md-bold" });

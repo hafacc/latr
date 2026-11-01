@@ -309,7 +309,17 @@ export class AppState {
   };
 
   setFocus = (id: string | null): void => {
+    this.caretHint = null;
     this.#dispatch({ type: "setFocus", id });
+  };
+
+  /** Where the caret goes in a row focused by the up/down arrows; read once by that row. */
+  caretHint: { id: string; x: number; edge: "first" | "last" } | null = null;
+
+  /** Focus a row from the up/down arrows, its caret at viewport x on its first or last line. */
+  focusFromArrow = (id: string, x: number, edge: "first" | "last"): void => {
+    this.setFocus(id);
+    this.caretHint = { id, x, edge };
   };
 
   dropEmpty = (): void => {
