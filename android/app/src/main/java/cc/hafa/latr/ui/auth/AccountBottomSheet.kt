@@ -31,8 +31,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import cc.hafa.latr.ui.theme.LatrTheme
-
-internal const val PRIVACY_URL = "https://latr.hafa.cc/privacy/"
+import cc.hafa.latr.util.InfoPages
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +49,7 @@ fun AccountBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showStats by remember { mutableStateOf(false) }
+    var showPrivacy by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
 
     ModalBottomSheet(
@@ -110,7 +110,15 @@ fun AccountBottomSheet(
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { uriHandler.openUri(PRIVACY_URL) }
+                    .clickable { showPrivacy = true }
+                    .padding(vertical = 12.dp)
+            )
+            Text(
+                text = "Feedback",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { uriHandler.openUri(InfoPages.FEEDBACK_URL) }
                     .padding(vertical = 12.dp)
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -135,6 +143,10 @@ fun AccountBottomSheet(
 
     if (showStats) {
         StatsBottomSheet(loadCounts = loadPickCounts, onDismiss = { showStats = false })
+    }
+
+    if (showPrivacy) {
+        InfoBottomSheet(InfoPages.PRIVACY_ASSET, InfoPages.PRIVACY_PATH, onDismiss = { showPrivacy = false })
     }
 
     if (showDeleteConfirm) {

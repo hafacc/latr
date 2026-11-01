@@ -16,12 +16,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import cc.hafa.latr.ui.theme.LatrTheme
+import cc.hafa.latr.util.InfoPages
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,6 +37,7 @@ fun SignInBottomSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val uriHandler = LocalUriHandler.current
+    var showPrivacy by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -71,10 +77,17 @@ fun SignInBottomSheet(
                 Text("Sign in with Google")
             }
             Spacer(modifier = Modifier.height(8.dp))
-            TextButton(onClick = { uriHandler.openUri(PRIVACY_URL) }) {
+            TextButton(onClick = { showPrivacy = true }) {
                 Text("Privacy")
             }
+            TextButton(onClick = { uriHandler.openUri(InfoPages.FEEDBACK_URL) }) {
+                Text("Feedback")
+            }
         }
+    }
+
+    if (showPrivacy) {
+        InfoBottomSheet(InfoPages.PRIVACY_ASSET, InfoPages.PRIVACY_PATH, onDismiss = { showPrivacy = false })
     }
 }
 

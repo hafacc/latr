@@ -6,6 +6,8 @@ import { defineConfig } from "vite";
 export default defineConfig({
   // Firebase alone is past Vite's default 500 kB warning.
   build: { chunkSizeWarningLimit: 800 },
+  // Info page text lives in the repo's content/, shared with the Android app.
+  server: { fs: { allow: [".", "../content"] } },
   plugins: [
     tailwindcss(),
     sveltekit({
