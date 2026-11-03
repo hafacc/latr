@@ -250,4 +250,25 @@ class TodoFilterTest {
             listOf(older, moved, sooner, newer).sorted(StatusFilter.SNOOZED),
         )
     }
+
+    @Test
+    fun heldPlaceKeepsAnEditedRowWhereItWas() {
+        val woke = todo(id = "woke", text = "a", modifiedAt = 100L, snoozeUntil = "2026-03-01T09:00")
+        val other = todo(id = "other", modifiedAt = 500L)
+        val held = HeldPlace()
+        held.place(listOf(woke, other), "woke")
+        val edited = woke.copy(text = "ab", snoozeUntil = null, modifiedAt = 900L)
+        assertEquals(listOf(woke, other), held.place(listOf(edited, other), "woke"))
+        assertEquals(listOf(edited, other), held.place(listOf(edited, other), null))
+    }
+
+    @Test
+    fun heldPlaceTakesChangesThatArentToTheText() {
+        val row = todo(id = "row", text = "a", modifiedAt = 100L)
+        val held = HeldPlace()
+        held.place(listOf(row), "row")
+        held.place(listOf(row.copy(text = "ab")), "row")
+        val pinned = row.copy(text = "ab", pinned = true, modifiedAt = 900L)
+        assertEquals(listOf(pinned.copy(text = "a")), held.place(listOf(pinned), "row"))
+    }
 }
