@@ -40,6 +40,7 @@ Track features and behavior here. When making changes, verify existing behavior 
 - No todo should be focused after pressing back
 - No todo should be focused after the keyboard is dismissed (e.g. swipe down)
 - When a todo gains focus, scroll to it first
+- A todo being edited keeps its place in the list until it loses focus, even when the edit would move it (the first edit of an unsnoozed row, or a search reranking as you type); other changes to it, like a pin, still move it. Web `heldInPlace` in `utils/todo.ts` (used by `todo-list.svelte`), Android `HeldPlace` in `ui/TodoFilter.kt`
 - Web: up/down arrows move through a todo's wrapped lines and only then into the next todo, landing on its nearest line at the same horizontal spot; a run of presses keeps the spot it started from, even through shorter todos (`focusFromArrow` in `utils/app-state.svelte.ts`, `focusAtEdge` on the editor handle)
 - No extra space should appear below the search bar when focusing a todo
 
