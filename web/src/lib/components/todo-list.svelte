@@ -5,6 +5,7 @@ import { type Bucket, groupForFilter } from "../utils/group";
 import { type DropSlot, planMove } from "../utils/reorder";
 import {
   type Filter,
+  heldInPlace,
   isoToEpoch,
   matchesFilter,
   rankBySearch,
@@ -64,11 +65,40 @@ function emptyCopy(filter: Filter): EmptyCopy {
 const app = getAppState();
 const searching = $derived(app.search.trim().length > 0);
 
+// The focused todo as the list places it: its place from before the edit, until focus leaves.
+let held = $state.raw<Todo | null>(null);
+let heldPrevious: Todo | null = null;
+$effect.pre(() => {
+  const focusId = app.focusId;
+  const live = focusId
+    ? app.todos.find((todo) => todo.id === focusId)
+    : undefined;
+  untrack(() => {
+    if (!live) held = null;
+    else if (!held || !heldPrevious || held.id !== live.id) held = live;
+    else if (live !== heldPrevious)
+      held = heldInPlace(held, heldPrevious, live);
+    heldPrevious = live ?? null;
+  });
+});
+const placed = $derived.by(() => {
+  const heldTodo = held;
+  return heldTodo
+    ? app.todos.map((todo) => (todo.id === heldTodo.id ? heldTodo : todo))
+    : app.todos;
+});
+const liveById = $derived(new Map(app.todos.map((todo) => [todo.id, todo])));
+function live(todos: Todo[]): Todo[] {
+  return todos.map((todo) => liveById.get(todo.id) ?? todo);
+}
+
 const ranked = $derived(
   searching
-    ? rankBySearch(
-        app.todos.filter((t) => matchesFilter(t, app.filter, app.now)),
-        app.search,
+    ? live(
+        rankBySearch(
+          placed.filter((t) => matchesFilter(t, app.filter, app.now)),
+          app.search,
+        ),
       )
     : [],
 );
@@ -77,12 +107,12 @@ const groups = $derived<Bucket[]>(
     ? []
     : groupForFilter(
         sortForFilter(
-          app.todos.filter((t) => matchesFilter(t, app.filter, app.now)),
+          placed.filter((t) => matchesFilter(t, app.filter, app.now)),
           app.filter,
         ),
         app.filter,
         app.now,
-      ),
+      ).map((group) => ({ ...group, todos: live(group.todos) })),
 );
 // In Snoozed a row only moves among rows snoozed to its own time.
 const tiedSnoozeTimes = $derived.by(() => {

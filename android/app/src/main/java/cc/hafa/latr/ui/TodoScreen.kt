@@ -706,10 +706,12 @@ fun TodoScreenContent(
         savedPage = pagerState.settledPage
     }
 
-    val filteredTodosByFilter = remember(todos, searchQuery, nowMillis) {
-        val visible = todos ?: emptyList()
+    val heldPlace = remember { HeldPlace() }
+    val placedTodos = remember(todos, focusId) { heldPlace.place(todos.orEmpty(), focusId) }
+    val filteredTodosByFilter = remember(placedTodos, searchQuery, nowMillis) {
+        val liveById = todos.orEmpty().associateBy { it.id }
         TAB_ORDER.associateWith { filter ->
-            visible.filterAndSort(filter, searchQuery, nowMillis)
+            placedTodos.filterAndSort(filter, searchQuery, nowMillis).map { liveById[it.id] ?: it }
         }
     }
     val entriesByFilter = remember(filteredTodosByFilter, nowMillis) {

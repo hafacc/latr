@@ -33,6 +33,39 @@ fun Todo.activeKey(zone: ZoneId = ZoneId.systemDefault()): String =
 fun Todo.listKey(filter: StatusFilter, zone: ZoneId = ZoneId.systemDefault()): String =
     if (filter == StatusFilter.ACTIVE) activeKey(zone) else ownKey()
 
+/**
+ * Keeps the todo being edited where it was in the list until it loses focus.
+ *
+ * [place] swaps the focused todo for a held copy: a text change keeps the held text and place, any
+ * other change (a pin, say) is taken, text aside. Show the live todos in the order it gives.
+ */
+class HeldPlace {
+    private var held: Todo? = null
+    private var previous: Todo? = null
+
+    /** The list to order by, with the focused todo at its held place. */
+    fun place(todos: List<Todo>, focusId: String?): List<Todo> {
+        val live = focusId?.let { id -> todos.firstOrNull { it.id == id } }
+        val lastHeld = held
+        val lastSeen = previous
+        held = when {
+            live == null -> null
+            lastHeld == null || lastSeen == null || lastHeld.id != live.id -> live
+            live == lastSeen -> lastHeld
+            live.text != lastSeen.text -> live.copy(
+                text = lastHeld.text,
+                snoozeUntil = lastHeld.snoozeUntil,
+                position = lastHeld.position,
+                modifiedAt = lastHeld.modifiedAt,
+            )
+            else -> live.copy(text = lastHeld.text)
+        }
+        previous = live
+        val heldTodo = held ?: return todos
+        return todos.map { if (it.id == heldTodo.id) heldTodo else it }
+    }
+}
+
 /** Pure filter+sort+search; ACTIVE floats pinned, SNOOZED goes by snooze time, then every list by [listKey] newest first. A query re-ranks by word-boundary prefix matches. */
 fun List<Todo>.filterAndSort(
     filter: StatusFilter,

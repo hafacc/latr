@@ -161,6 +161,26 @@ export function listKey(t: Todo, filter: Filter): string {
   return filter === "ACTIVE" ? activeKey(t) : ownKey(t);
 }
 
+/**
+ * The copy of a todo being edited that the list places it by, so its row stays put until it loses focus.
+ *
+ * `held` is the copy so far, `previous` and `live` the stored todo before and after a change. A
+ * text change keeps the held text and place; any other change (a pin, say) is taken, text aside.
+ */
+export function heldInPlace(held: Todo, previous: Todo, live: Todo): Todo {
+  if (live.text !== previous.text) {
+    return {
+      ...live,
+      text: held.text,
+      snoozeUntil: held.snoozeUntil,
+      position: held.position,
+      modifiedAt: held.modifiedAt,
+    };
+  } else {
+    return { ...live, text: held.text };
+  }
+}
+
 /** Flips `pinned`; only an active row also drops its was-snoozed marker. */
 export function withPinToggled(t: Todo, now: number): Todo {
   const pinned = !t.pinned;

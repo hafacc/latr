@@ -5,6 +5,7 @@ import type { Repeat } from "./repeat";
 import {
   epochToIso,
   fromFirestore,
+  heldInPlace,
   isoToEpoch,
   matchesFilter,
   rankBySearch,
@@ -341,6 +342,31 @@ describe("sortForFilter", () => {
     const snapshot = input.slice();
     sortForFilter(input, "ACTIVE");
     expect(input).toEqual(snapshot);
+  });
+});
+
+describe("heldInPlace", () => {
+  const wokeAt = "2026-03-01T09:00";
+
+  test("a text edit keeps the held text and place", () => {
+    const before = todo({ text: "a", modifiedAt: 100, snoozeUntil: wokeAt });
+    const after = {
+      ...before,
+      text: "ab",
+      snoozeUntil: null,
+      modifiedAt: isoToEpoch(wokeAt),
+    };
+    expect(heldInPlace(before, before, after)).toEqual({ ...after, ...before });
+  });
+
+  test("a change that isn't to the text is taken, text aside", () => {
+    const held = todo({ text: "a", modifiedAt: 100 });
+    const previous = { ...held, text: "ab" };
+    const pinned = { ...previous, pinned: true, modifiedAt: 900 };
+    expect(heldInPlace(held, previous, pinned)).toEqual({
+      ...pinned,
+      text: "a",
+    });
   });
 });
 
