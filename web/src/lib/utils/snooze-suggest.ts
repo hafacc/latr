@@ -1,5 +1,7 @@
 // Learned snooze suggestions (see CLAUDE.md "Snooze Options"). Pure functions only.
 
+import { LABEL_LOCALE } from "./format";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
@@ -952,7 +954,7 @@ export function quickTimeEpoch(
 }
 
 const WEEKDAY_NAMES = (() => {
-  const fmt = new Intl.DateTimeFormat(undefined, { weekday: "long" });
+  const fmt = new Intl.DateTimeFormat(LABEL_LOCALE, { weekday: "long" });
   // 2023-01-02 was a Monday; index 0 = ISO dow 1 (Monday) .. index 6 = ISO dow 7 (Sunday).
   return Array.from({ length: 7 }, (_, i) =>
     fmt.format(new Date(2023, 0, 2 + i)),
@@ -983,12 +985,12 @@ function formatters(): Formatters {
   if (formatterCache?.zone !== zone) {
     formatterCache = {
       zone,
-      time: new Intl.DateTimeFormat(undefined, {
+      time: new Intl.DateTimeFormat(LABEL_LOCALE, {
         hour: "2-digit",
         minute: "2-digit",
         hourCycle: "h23",
       }),
-      date: new Intl.DateTimeFormat(undefined, {
+      date: new Intl.DateTimeFormat(LABEL_LOCALE, {
         month: "short",
         day: "numeric",
       }),

@@ -7,7 +7,8 @@ Monorepo with a Kotlin Android app (`android/`), shared Firestore rules (`fireba
 Track features and behavior here. When making changes, verify existing behavior isn't broken. Add unit tests when possible.
 
 ### Todo Display
-- Snoozed todos show time as "<date> at <time>" using DateUtils (render date and time independently, concatenate with " at ")
+- Snoozed todos show time as "<date> at <time>" (render date and time independently, concatenate with " at ")
+- Day and month names are always English (`LABEL_LOCALE`: web `utils/format.ts`, Android `SnoozeSuggestions.LABEL_LOCALE`), whatever the phone or browser language, since they sit inside English text: snooze labels, a snoozed row's date, and the web picker's month heading
 - Snooze time formatting uses abs() on time delta so past snooze times >24h ago also show date+time format
 - All clock times render 24-hour (`HH:mm`, e.g. `09:00`, `20:30`) on both platforms, regardless of locale or the device's 12/24-hour setting: web `hourCycle: "h23"` (`utils/format.ts`, `formatClock` in `utils/snooze-suggest.ts`), Android `SnoozeSuggestions.formatClock` (also used by `LocalDateTimeUtil.formatSnoozeTime`) and a 24-hour Material `TimePicker`. Web's custom picker takes the time as typed 24-hour text (`parseClockInput` in `utils/calendar.ts` accepts `9`, `930`, `09:30`), not a native `<input type="time">`, which would follow the browser's locale.
 
