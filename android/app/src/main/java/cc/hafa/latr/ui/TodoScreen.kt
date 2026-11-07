@@ -1531,7 +1531,7 @@ fun TodoItem(
                     val within24h =
                         abs(snoozeMillis - System.currentTimeMillis()) < DAY_MILLIS
                     val snoozeLabel = remember(snoozeMillis, within24h, snoozed) {
-                        val time = LocalDateTimeUtil.formatSnoozeTime(snoozeMillis, context)
+                        val time = LocalDateTimeUtil.formatSnoozeTime(snoozeMillis)
                         if (snoozed) time else "Unsnoozed · $time"
                     }
                     Text(

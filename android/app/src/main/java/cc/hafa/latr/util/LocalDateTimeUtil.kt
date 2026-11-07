@@ -1,10 +1,9 @@
 package cc.hafa.latr.util
 
-import android.content.Context
-import android.text.format.DateUtils
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.math.abs
 
 object LocalDateTimeUtil {
@@ -20,19 +19,18 @@ object LocalDateTimeUtil {
         return LocalDateTime.now().toString()
     }
 
-    fun formatSnoozeTime(epochMillis: Long, context: Context): String {
+    fun formatSnoozeTime(epochMillis: Long): String {
         val now = System.currentTimeMillis()
         val hoursDelta = abs(epochMillis - now) / (1000 * 60 * 60)
         val timeStr = SnoozeSuggestions.formatClock(epochMillis, ZoneId.systemDefault())
         return if (hoursDelta < 24) {
             timeStr
         } else {
-            val dateStr = DateUtils.formatDateTime(
-                context,
-                epochMillis,
-                DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_ALL
-            )
+            val dateStr = LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
+                .format(DATE_FORMAT)
             "$dateStr at $timeStr"
         }
     }
+
+    private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d", SnoozeSuggestions.LABEL_LOCALE)
 }

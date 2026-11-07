@@ -789,7 +789,7 @@ object SnoozeSuggestions {
             labelText("$rule@0000", target, now, zone)
         } else {
             val dt = LocalDateTime.ofInstant(Instant.ofEpochMilli(target), zone)
-            "${dt.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())} ${dt.dayOfMonth}"
+            "${dt.month.getDisplayName(TextStyle.SHORT, LABEL_LOCALE)} ${dt.dayOfMonth}"
         }
         return "Last · $text"
     }
@@ -798,7 +798,10 @@ object SnoozeSuggestions {
     fun formatClock(epochMillis: Long, zone: ZoneId): String =
         formatClockTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), zone))
 
-    private fun dayName(dow: DayOfWeek): String = dow.getDisplayName(TextStyle.FULL, Locale.getDefault())
+    /** Locale for day and month names, which always sit inside English text. */
+    val LABEL_LOCALE: Locale = Locale.US
+
+    private fun dayName(dow: DayOfWeek): String = dow.getDisplayName(TextStyle.FULL, LABEL_LOCALE)
 
     private val CLOCK_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
