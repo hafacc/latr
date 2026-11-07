@@ -1,10 +1,13 @@
-const timeFmt = new Intl.DateTimeFormat(undefined, {
+/** Locale for day and month names, which always sit inside English text. */
+export const LABEL_LOCALE = "en-US";
+
+const timeFmt = new Intl.DateTimeFormat(LABEL_LOCALE, {
   hour: "2-digit",
   minute: "2-digit",
   hourCycle: "h23",
 });
 
-const dateFmt = new Intl.DateTimeFormat(undefined, {
+const dateFmt = new Intl.DateTimeFormat(LABEL_LOCALE, {
   month: "short",
   day: "numeric",
 });

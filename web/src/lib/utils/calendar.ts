@@ -1,3 +1,5 @@
+import { LABEL_LOCALE } from "./format";
+
 export type CalendarDay = {
   ymd: string;
   day: number;
@@ -46,7 +48,7 @@ export function monthGrid(
 }
 
 export function monthLabel(year: number, month: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(LABEL_LOCALE, {
     month: "long",
     year: "numeric",
   }).format(new Date(year, month, 1));
